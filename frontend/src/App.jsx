@@ -1,160 +1,123 @@
-// Import React and required React hooks
-// useState  → to store UI data (messages, input, mic state)
-// useEffect → to run code when messages change
-// useRef    → to access DOM elements (for auto-scroll)
 import React, { useState, useEffect, useRef } from 'react';
-
-// Axios is used to send HTTP requests to the backend
 import axios from 'axios';
+import { io } from 'socket.io-client';
+import './App.css';
 
-// Import CSS styling for the UI
-import './App.css'; 
-
-// Main React component – this is the entire frontend app
 function App() {
-
-  // Stores the full chat history (user + bot messages)
   const [messages, setMessages] = useState([
-    { sender: 'bot', text: 'Hello! I am DIVA. How can I help you?' }
+    { sender: 'bot', text: 'Hello! Click the mic to speak.' }
   ]);
-
-  // Stores the current text typed by the user
   const [inputText, setInputText] = useState("");
-
-  // Stores AI-predicted suggestion (future action)
   const [suggestion, setSuggestion] = useState(null); 
-
-  // Tracks whether microphone is recording or not
   const [isRecording, setIsRecording] = useState(false);
+  const [socket, setSocket] = useState(null);
   
-  // Reference to the last message (used for auto-scrolling)
   const chatEndRef = useRef(null);
 
-  // Runs automatically whenever messages change
-  // Scrolls chat window to the latest message
+  // --- 🔊 NEW: VOICE OUTPUT ENGINE ---
+  const speak = (text) => {
+    // Stop any previous speech so they don't overlap
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Optional: Customize the voice
+    // const voices = window.speechSynthesis.getVoices();
+    // utterance.voice = voices[0]; // 0 is usually the default system voice
+    
+    utterance.rate = 1; // Speed (0.1 to 10)
+    utterance.pitch = 1; // Pitch (0 to 2)
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // --- SOCKET CONNECTION ---
+  useEffect(() => {
+    const newSocket = io('http://localhost:5000');
+    setSocket(newSocket);
+
+    newSocket.on('voice_input', (text) => {
+      setMessages((prev) => [...prev, { sender: 'user', text: text }]);
+    });
+
+    newSocket.on('bot_response', (text) => {
+      setMessages((prev) => [...prev, { sender: 'bot', text: text }]);
+      speak(text); // <--- DIVA SPEAKS HERE (Voice Response)
+    });
+
+    return () => newSocket.disconnect();
+  }, []);
+
+  // Auto-scroll
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Called when user clicks Send or presses Enter
-  const handleSend = async () => {
-
-    // Prevent sending empty messages
-    if (!inputText.trim()) return;
-
-    // Create user message object
-    const userMsg = { sender: 'user', text: inputText };
-
-    // Add user message to chat UI
-    setMessages((prev) => [...prev, userMsg]);
-
-    // Clear input field
-    setInputText(""); 
-
-    // Remove old suggestion when new command is sent
-    setSuggestion(null); 
-
-    try {
-      // Send user text to backend server
-      const response = await axios.post(
-        'http://127.0.0.1:5000/chat',
-        { text: userMsg.text }
-      );
-
-      // Extract backend response
-      const data = response.data;
-      let botText = "";
-      
-      // If backend classifies it as conversation
-      if (data.type === 'conversation') {
-        botText = data.response;
-      } 
-      
-      // If backend classifies it as system action
-      else if (data.type === 'system_action') {
-        botText = `Executing: ${data.intent} on ${data.entities.app || 'system'}`;
-
-        // Temporary hardcoded suggestion (later from Markov model)
-        setSuggestion("Open VS Code?"); 
-      }
-
-      // Add bot response to chat UI
-      setMessages((prev) => [...prev, { sender: 'bot', text: botText }]);
-
-    } catch (error) {
-      // Handle backend connection failure
-      console.error("Error talking to backend:", error);
-
-      // Show error message in chat
-      setMessages((prev) => [
-        ...prev, 
-        { sender: 'bot', text: "❌ Error: Backend is offline." }
-      ]);
+  // --- MIC BUTTON LOGIC ---
+  const toggleMic = () => {
+    if (!socket) return;
+    if (isRecording) {
+      socket.emit('stop_listening');
+      setIsRecording(false);
+    } else {
+      socket.emit('start_listening');
+      setIsRecording(true);
     }
   };
 
-  // Detect Enter key press to send message
+  const handleSend = async () => {
+    if (!inputText.trim()) return;
+    const userMsg = { sender: 'user', text: inputText };
+    setMessages((prev) => [...prev, userMsg]);
+    setInputText(""); 
+    
+    try {
+      const response = await axios.post('http://127.0.0.1:5000/chat', { text: userMsg.text });
+      const data = response.data;
+      
+      let botText = "";
+      if (data.type === 'conversation') {
+        botText = data.response;
+      } else if (data.type === 'system_action') {
+        botText = data.response || `Executing: ${data.intent}`;
+      }
+      
+      setMessages((prev) => [...prev, { sender: 'bot', text: botText }]);
+      speak(botText); // <--- DIVA SPEAKS HERE (Text Response)
+
+    } catch (error) {
+        console.error(error);
+    }
+  };
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') handleSend();
   };
 
-  // Toggle microphone ON/OFF
-  // (Actual voice logic will be added later)
-  const toggleMic = () => {
-    setIsRecording(!isRecording);
-
-    if (!isRecording) {
-      alert("Microphone logic coming soon!");
-    }
-  };
-
-  // Accept AI suggestion and place it into input field
-  const acceptSuggestion = () => {
-    setInputText(suggestion); 
-  };
-
-  // UI layout rendered in browser
   return (
     <div className="app-container">
-
-      {/* Header section */}
       <div className="header">
         <h1>🟦 DIVA Assistant</h1>
       </div>
 
-      {/* Chat messages window */}
       <div className="chat-window">
         {messages.map((msg, index) => (
-          <div 
-            key={index} 
-            className={`message ${msg.sender === 'user' ? 'user-msg' : 'bot-msg'}`}
-          >
+          <div key={index} className={`message ${msg.sender === 'user' ? 'user-msg' : 'bot-msg'}`}>
             {msg.text}
           </div>
         ))}
-
-        {/* Invisible element used for auto-scroll */}
+        {isRecording && <div className="listening-indicator">🔴 Listening...</div>}
         <div ref={chatEndRef} />
       </div>
 
-      {/* Suggestion bar (shown only if suggestion exists) */}
-      {suggestion && (
-        <div className="suggestion-bar">
-          <div className="suggestion-chip" onClick={acceptSuggestion}>
-            💡 {suggestion}
-          </div>
-        </div>
-      )}
-
-      {/* Input section */}
       <div className="input-area">
-
-        {/* Microphone button */}
-        <button className="mic-btn" onClick={toggleMic}>
-          {isRecording ? '🔴' : '🎤'}
+        <button 
+          className={`mic-btn ${isRecording ? 'recording' : ''}`} 
+          onClick={toggleMic}
+        >
+          {isRecording ? '🟥' : '🎤'}
         </button>
         
-        {/* Text input field */}
         <input 
           type="text" 
           placeholder="Type a command..." 
@@ -163,15 +126,12 @@ function App() {
           onKeyPress={handleKeyPress}
         />
         
-        {/* Send button */}
         <button className="send-btn" onClick={handleSend}>
-          📩 Send
+          📩
         </button>
-
       </div>
     </div>
   );
 }
 
-// Export component so React can render it
 export default App;

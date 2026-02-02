@@ -137,3 +137,14 @@ button {
 .mic-btn:hover {
   opacity: 0.8;
 }
+
+.listening-badge {
+    background-color: #2d2d2d;
+    color: #00ff88; /* Green text */
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    margin-right: 10px;
+    border: 1px solid #004422;
+    white-space: nowrap;
+}
