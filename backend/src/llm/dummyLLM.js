@@ -1,28 +1,41 @@
 function dummyLLM(userInput) {
   const text = userInput.toLowerCase();
+  console.log("🧠 Brain analyzing:", text); // Debug log
 
-  // Simple rules for system actions
-  if (text.includes("open") && text.includes("chrome")) {
+  // --- Rule 1: Chrome ---
+  if (text.includes("chrome")) {
     return {
       type: "system_action",
       intent: "open_app",
       entities: { app: "chrome" }
     };
-  } else if (text.includes("open") && text.includes("vscode")) {
+  } 
+  // --- Rule 2: VS Code ---
+  else if (text.includes("vscode") || text.includes("code")) {
     return {
       type: "system_action",
       intent: "open_app",
       entities: { app: "vscode" }
     };
-  } else if (text.includes("play") && text.includes("music")) {
+  } 
+  // --- Rule 3: Notepad ---
+  else if (text.includes("notepad")) {
     return {
       type: "system_action",
-      intent: "play_music",
-      entities: {}
+      intent: "open_app",
+      entities: { app: "notepad" }
+    };
+  }
+  // --- Rule 4: Calculator ---
+  else if (text.includes("calculator") || text.includes("calc")) {
+    return {
+      type: "system_action",
+      intent: "open_app",
+      entities: { app: "calculator" }
     };
   }
 
-  // Anything else → conversation
+  // Fallback -> Conversation
   return {
     type: "conversation",
     response: "Hello! I got your message. This is a dummy LLM response."

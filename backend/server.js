@@ -3,8 +3,9 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// IMPORT THE DUMMY BRAIN
+// IMPORT BRAIN AND MUSCLES
 const { dummyLLM } = require('./src/llm/dummyLLM');
+const { executeAction } = require('./src/intent/actionHandler'); // <--- NEW
 
 const app = express();
 const server = http.createServer(app);
@@ -22,29 +23,38 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 🧠 THE CHAT ENDPOINT (Frontend talks to this)
+// 🧠 THE CHAT ENDPOINT
 // ==========================================
 app.post('/chat', (req, res) => {
-    const userText = req.body.text; // Get text from frontend
+    const userText = req.body.text; 
     console.log(`📩 Received: "${userText}"`);
 
-    // 1. Process with Dummy AI
+    // 1. Process with AI (Brain)
     const decision = dummyLLM(userText);
     
-    // 2. Log the decision
-    console.log("🧠 AI Decision:", decision);
+    // 2. Execute Action (Muscles) if needed
+    (async () => {
+        let finalResponse = "";
 
-    // 3. Send back to Frontend
-    res.json(decision);
-});
+        if (decision.type === 'system_action') {
+            // DO THE ACTION
+            finalResponse = await executeAction(decision);
+        } else {
+            // JUST CHAT
+            finalResponse = decision.response;
+        }
 
-io.on('connection', (socket) => {
-    console.log(`⚡ New Client Connected: ${socket.id}`);
-    socket.on('disconnect', () => { console.log('❌ Client Disconnected'); });
+        // 3. Send response back to Frontend
+        // We modify the decision object to include the final confirmation text
+        decision.response = finalResponse;
+        
+        console.log("📤 Sending back:", decision);
+        res.json(decision);
+    })();
 });
 
 server.listen(PORT, () => {
     console.log(`\n================================`);
-    console.log(`🚀 DIVA Backend (Dummy Mode) Active on Port ${PORT}`);
+    console.log(`🚀 DIVA Backend Active on Port ${PORT}`);
     console.log(`================================\n`);
 });
