@@ -2,50 +2,70 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const path = require('path');
 
-// IMPORT BRAIN AND MUSCLES
-const { dummyLLM } = require('./src/llm/dummyLLM');
-const { executeAction } = require('./src/intent/actionHandler'); // <--- NEW
+// ==========================================
+// 🔗 CONNECTING EXTERNAL FOLDERS
+// ==========================================
+// We use path.join to jump out of 'backend' (..) and into 'ai' or 'automation'
 
+// 1. Connect to the Brain (AI)
+const { dummyLLM } = require(path.join(__dirname, '../ai/dummyLLM'));
+
+// 2. Connect to the Muscles (Automation)
+const { executeAction } = require(path.join(__dirname, '../automation/actionHandler'));
+
+
+// ==========================================
+// ⚙️ SERVER SETUP
+// ==========================================
 const app = express();
 const server = http.createServer(app);
 const PORT = 5000;
 
+// Middleware (Security & Parsing)
 app.use(cors());
 app.use(express.json());
 
+// Socket.io Setup (For real-time voice later)
 const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
+    cors: {
+        origin: "*", 
+        methods: ["GET", "POST"]
+    }
 });
 
+
+// ==========================================
+// 🛣️ API ROUTES
+// ==========================================
+
+// Health Check
 app.get('/', (req, res) => {
-    res.send('✅ DIVA Backend is Running...');
+    res.send('✅ DIVA Backend is Running & Connected to AI/Automation folders.');
 });
 
-// ==========================================
-// 🧠 THE CHAT ENDPOINT
-// ==========================================
+// 🧠 MAIN CHAT ENDPOINT
 app.post('/chat', (req, res) => {
     const userText = req.body.text; 
-    console.log(`📩 Received: "${userText}"`);
+    console.log(`\n📩 Received: "${userText}"`);
 
-    // 1. Process with AI (Brain)
+    // 1. Ask the Brain (AI Folder)
     const decision = dummyLLM(userText);
     
-    // 2. Execute Action (Muscles) if needed
+    // 2. Check if Action is needed (Automation Folder)
     (async () => {
         let finalResponse = "";
 
         if (decision.type === 'system_action') {
-            // DO THE ACTION
+            // Execute the muscle movement
             finalResponse = await executeAction(decision);
         } else {
-            // JUST CHAT
+            // Just a conversation
             finalResponse = decision.response;
         }
 
-        // 3. Send response back to Frontend
-        // We modify the decision object to include the final confirmation text
+        // 3. Prepare response
         decision.response = finalResponse;
         
         console.log("📤 Sending back:", decision);
@@ -53,8 +73,25 @@ app.post('/chat', (req, res) => {
     })();
 });
 
+
+// ==========================================
+// 🔌 SOCKET.IO (Voice Stream Placeholder)
+// ==========================================
+io.on('connection', (socket) => {
+    console.log(`⚡ Client Connected: ${socket.id}`);
+
+    socket.on('disconnect', () => {
+        console.log(`❌ Client Disconnected: ${socket.id}`);
+    });
+});
+
+
+// ==========================================
+// 🚀 START SERVER
+// ==========================================
 server.listen(PORT, () => {
     console.log(`\n================================`);
     console.log(`🚀 DIVA Backend Active on Port ${PORT}`);
+    console.log(`🔗 Linked to: /ai and /automation`);
     console.log(`================================\n`);
 });
