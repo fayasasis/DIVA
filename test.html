@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Main Assistant Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#0f172a",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .neon-glow {
+            box-shadow: 0 0 15px rgba(19, 91, 236, 0.3);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #232f48;
+            border-radius: 10px;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 min-h-screen">
+<div class="relative flex h-full w-full flex-col overflow-x-hidden">
+<!-- Top Navigation -->
+<header class="flex items-center justify-between border-b border-solid border-slate-200 dark:border-slate-800 px-10 py-3 sticky top-0 z-50 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md">
+<div class="flex items-center gap-4">
+<div class="size-8 bg-primary rounded-lg flex items-center justify-center text-white">
+<span class="material-symbols-outlined">bolt</span>
+</div>
+<h2 class="text-lg font-bold leading-tight tracking-tight">AI Assistant</h2>
+</div>
+<div class="flex flex-1 justify-end gap-4 items-center">
+<div class="flex gap-2">
+<button class="flex items-center justify-center rounded-lg h-10 w-10 bg-slate-200 dark:bg-[#232f48] hover:bg-primary/20 transition-colors">
+<span class="material-symbols-outlined text-xl">settings</span>
+</button>
+<button class="flex items-center justify-center rounded-lg h-10 w-10 bg-slate-200 dark:bg-[#232f48] hover:bg-primary/20 transition-colors relative">
+<span class="material-symbols-outlined text-xl">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+</button>
+</div>
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10 border-2 border-primary/30" data-alt="User profile avatar" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDOlMpGKLKblgsKUYKalbsqZflunF5xP4fPFmsKo-vHgX-gIfNWjekm4UQDolz8pyofEBtPRsfp-OYpa61Zs9ti3xT5OAkNmeZruOH6evZEaRk2aiKJsMGFSa6_7AZhhev6R2wJJvU8u4DfAZKs_tNTSigONIbry6nJtqighEBfuK10XqSetHXuog2q69mAEbyzHSjXvSLJ_hGega646Jnad3j_XyoRRgQcKYN3c85jqwrUcHnpVacb92rSylpPt_7dE4kFh7JryyTN");'>
+</div>
+</div>
+</header>
+<main class="flex-1 max-w-[1400px] mx-auto w-full px-6 py-8">
+<!-- Floating Command Bar -->
+<div class="flex flex-col items-center mb-12">
+<div class="w-full max-w-3xl">
+<h1 class="text-3xl font-bold mb-6 text-center text-slate-800 dark:text-white">Good Morning, Alex</h1>
+<div class="glass-effect neon-glow rounded-xl p-2 flex items-center gap-3 focus-within:ring-2 focus-within:ring-primary/50 transition-all">
+<div class="pl-4 text-primary">
+<span class="material-symbols-outlined text-2xl">auto_awesome</span>
+</div>
+<input class="w-full bg-transparent border-none focus:ring-0 text-lg py-3 placeholder:text-slate-500 dark:placeholder:text-slate-400" placeholder="Ask me to summarize, schedule, or create anything..." type="text"/>
+<div class="flex gap-2 pr-2">
+<button class="bg-primary hover:bg-primary/90 text-white rounded-lg px-4 py-2 font-semibold text-sm transition-all flex items-center gap-2">
+<span>Send</span>
+<span class="material-symbols-outlined text-sm">send</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Dashboard Grid -->
+<div class="grid grid-cols-12 gap-6 items-start">
+<!-- Left Sidebar: My Day -->
+<aside class="col-span-12 lg:col-span-3 space-y-6">
+<div class="bg-white dark:bg-[#1a2235] rounded-xl p-5 border border-slate-200 dark:border-slate-800">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-bold text-lg flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">calendar_today</span>
+                                My Day
+                            </h3>
+<span class="text-xs text-slate-500 font-medium">Oct 24</span>
+</div>
+<!-- Weather Card -->
+<div class="bg-gradient-to-br from-primary/10 to-purple-500/10 rounded-lg p-4 mb-6 border border-primary/20">
+<div class="flex justify-between items-center">
+<div>
+<p class="text-3xl font-bold">72°F</p>
+<p class="text-sm text-slate-500 dark:text-slate-400">Partly Cloudy</p>
+</div>
+<span class="material-symbols-outlined text-4xl text-yellow-500">wb_sunny</span>
+</div>
+</div>
+<!-- Timeline -->
+<div class="space-y-4">
+<div class="flex gap-4">
+<div class="flex flex-col items-center">
+<div class="w-2 h-2 rounded-full bg-primary mt-2"></div>
+<div class="w-0.5 h-full bg-slate-200 dark:bg-slate-800"></div>
+</div>
+<div class="pb-4">
+<p class="text-xs font-bold text-primary uppercase">10:00 AM</p>
+<p class="text-sm font-semibold">Design Sync</p>
+<p class="text-xs text-slate-500">Google Meet</p>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="flex flex-col items-center">
+<div class="w-2 h-2 rounded-full bg-slate-400 mt-2"></div>
+<div class="w-0.5 h-full bg-slate-200 dark:bg-slate-800"></div>
+</div>
+<div class="pb-4">
+<p class="text-xs font-bold text-slate-500 uppercase">12:30 PM</p>
+<p class="text-sm font-semibold">Lunch Break</p>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="flex flex-col items-center">
+<div class="w-2 h-2 rounded-full bg-purple-500 mt-2"></div>
+</div>
+<div>
+<p class="text-xs font-bold text-purple-500 uppercase">02:00 PM</p>
+<p class="text-sm font-semibold">AI Research Prep</p>
+<p class="text-xs text-slate-500">Deep work session</p>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Center: Recent Conversations -->
+<section class="col-span-12 lg:col-span-6 space-y-6">
+<div class="flex border-b border-slate-200 dark:border-slate-800 gap-8 px-2">
+<a class="flex flex-col items-center justify-center border-b-[3px] border-b-primary pb-3" href="#">
+<p class="text-sm font-bold">Recent Feed</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[3px] border-b-transparent text-slate-500 pb-3" href="#">
+<p class="text-sm font-bold">Pinned</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[3px] border-b-transparent text-slate-500 pb-3" href="#">
+<p class="text-sm font-bold">Drafts</p>
+</a>
+</div>
+<div class="space-y-4 h-[600px] overflow-y-auto custom-scrollbar pr-2">
+<!-- Message 1 -->
+<div class="bg-white dark:bg-[#1a2235] rounded-xl p-5 border border-slate-200 dark:border-slate-800 transition-hover hover:border-primary/40 group">
+<div class="flex items-start gap-4">
+<div class="size-8 rounded-full bg-slate-200 dark:bg-slate-700 flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm">person</span>
+</div>
+<div class="space-y-1">
+<p class="text-sm text-slate-500 font-medium">You asked</p>
+<p class="font-medium">Can you summarize the 'Project_A_Specs.pdf' document I uploaded earlier?</p>
+</div>
+</div>
+<div class="mt-4 pl-12 flex items-start gap-4">
+<div class="size-8 rounded-full bg-primary/20 text-primary flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm">smart_toy</span>
+</div>
+<div class="space-y-2 flex-1">
+<p class="text-sm text-slate-500 font-medium">Assistant replied</p>
+<div class="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3 text-sm leading-relaxed border border-slate-100 dark:border-slate-800">
+                                        The document outlines three main phases for the Q4 launch: 
+                                        1. Infrastructure Audit, 2. Beta Testing (starts Nov 15), and 3. General Availability. 
+                                        Key stakeholders identified include the DevOps and UI/UX teams...
+                                    </div>
+<button class="text-primary text-xs font-bold hover:underline">View full summary</button>
+</div>
+</div>
+</div>
+<!-- Message 2 -->
+<div class="bg-white dark:bg-[#1a2235] rounded-xl p-5 border border-slate-200 dark:border-slate-800 transition-hover hover:border-primary/40 group">
+<div class="flex items-start gap-4">
+<div class="size-8 rounded-full bg-slate-200 dark:bg-slate-700 flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm">person</span>
+</div>
+<div class="space-y-1">
+<p class="text-sm text-slate-500 font-medium">You asked</p>
+<p class="font-medium">Generate a futuristic city skyline image with neon accents.</p>
+</div>
+</div>
+<div class="mt-4 pl-12 flex items-start gap-4">
+<div class="size-8 rounded-full bg-primary/20 text-primary flex-shrink-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-sm">smart_toy</span>
+</div>
+<div class="space-y-3 flex-1">
+<p class="text-sm text-slate-500 font-medium">Assistant generated</p>
+<div class="relative rounded-lg overflow-hidden aspect-video border border-slate-100 dark:border-slate-800 group/img">
+<div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity flex items-end p-3">
+<button class="bg-white/20 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">download</span> Download
+                                            </button>
+</div>
+<div class="w-full h-full bg-slate-100 dark:bg-slate-800" data-alt="Futuristic neon city skyline digital art" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuA4t-HKh2_N-D13AkuQezdJqMJaaAbkIwId6gv7Scs1FS29RtxWtynw7LS8jbqgusCt7HjFOfAHeLRHRVunEY6Ct6KgVdlCTJ9foCA6A1xESfKHtbR5LgnZzeHlb4XGxaTvK9s10qLg7TPD5PvqYOTqsD7N0UTXSdYqSpnL7Tks6OibWU9jVvubzmeKg2EFZ-i2fvJvoUvCbSOFccpcbUvWyTutbe0G87_sYMHbMmpv0mr2uJmUwIWlC5vYwLFy9tkrT_uCOE5IxGHs'); background-size: cover; background-position: center;"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Sidebar: Quick Actions -->
+<aside class="col-span-12 lg:col-span-3 space-y-6">
+<div class="bg-white dark:bg-[#1a2235] rounded-xl p-5 border border-slate-200 dark:border-slate-800">
+<h3 class="font-bold text-lg mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">bolt</span>
+                            Quick Actions
+                        </h3>
+<div class="grid grid-cols-1 gap-3">
+<button class="flex items-center gap-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/50 hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all text-left group">
+<div class="size-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-colors">
+<span class="material-symbols-outlined">description</span>
+</div>
+<div>
+<p class="text-sm font-bold">Summarize Doc</p>
+<p class="text-xs text-slate-500">Extract key insights</p>
+</div>
+</button>
+<button class="flex items-center gap-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/50 hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all text-left group">
+<div class="size-10 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center group-hover:bg-purple-500 group-hover:text-white transition-colors">
+<span class="material-symbols-outlined">event</span>
+</div>
+<div>
+<p class="text-sm font-bold">Schedule Meeting</p>
+<p class="text-xs text-slate-500">Auto-find gaps</p>
+</div>
+</button>
+<button class="flex items-center gap-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/50 hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all text-left group">
+<div class="size-10 rounded-lg bg-blue-400/10 text-blue-400 flex items-center justify-center group-hover:bg-blue-400 group-hover:text-white transition-colors">
+<span class="material-symbols-outlined">image</span>
+</div>
+<div>
+<p class="text-sm font-bold">Generate Image</p>
+<p class="text-xs text-slate-500">AI creative studio</p>
+</div>
+</button>
+<button class="flex items-center gap-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/50 hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all text-left group">
+<div class="size-10 rounded-lg bg-green-500/10 text-green-500 flex items-center justify-center group-hover:bg-green-500 group-hover:text-white transition-colors">
+<span class="material-symbols-outlined">code</span>
+</div>
+<div>
+<p class="text-sm font-bold">Review Code</p>
+<p class="text-xs text-slate-500">Debug &amp; optimize</p>
+</div>
+</button>
+</div>
+<hr class="my-6 border-slate-200 dark:border-slate-800"/>
+<div class="space-y-4">
+<p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Models</p>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+<span class="text-xs font-medium">Assistant v4.2</span>
+</div>
+<span class="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full font-bold">PRO</span>
+</div>
+</div>
+</div>
+</aside>
+</div>
+</main>
+</div>
+</body></html>

@@ -1,179 +1,106 @@
-// ==============================
-// CORE SERVER LIBRARIES
-// ==============================
-
-// Express is the backend framework
-// It helps us create APIs like /chat
 const express = require('express');
-
-// CORS allows frontend (React) to talk to backend safely
 const cors = require('cors');
-
-// HTTP is used to create a server that Express + Socket.io can share
 const http = require('http');
-
-// Socket.io enables real-time communication (for voice streaming)
 const { Server } = require('socket.io');
-
-// Path helps us safely connect files across folders
 const path = require('path');
+const sequelize = require('./config/database');
+const Chat = require('./models/Chat');
 
-
-// ==============================
-// CONNECTING DIVA MODULES
-// ==============================
-
-// 🧠 1. BRAIN – AI DECISION MAKER
-// This sends text to Phi-3 Mini (via Ollama)
-// It returns a JSON decision like:
-// { type, intent, entities, response }
-const { queryOllama } = require(
-  path.join(__dirname, '../ai/ollamaService')
-);
-
-// 🦾 2. MUSCLES – SYSTEM AUTOMATION
-// Executes actions like opening apps
-const { executeAction } = require(
-  path.join(__dirname, '../automation/actionHandler')
-);
-
-// 👂 3. EARS – VOICE RECOGNITION
-// Listens to microphone and converts speech → text
-const { startListening } = require(
-  path.join(__dirname, '../ai/voiceService')
-);
-
-
-// ==============================
-// SERVER INITIALIZATION
-// ==============================
+// --- 🔗 LINKING SIBLING FOLDERS ---
+// We use '../' to step out of 'backend' and into 'ai' or 'automation'
+const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService'));
+const { executeAction } = require(path.join(__dirname, '../automation/actionHandler'));
+const { startListening } = require(path.join(__dirname, '../ai/voiceService'));
 
 const app = express();
-
-// Create HTTP server so Express + Socket.io work together
 const server = http.createServer(app);
-
-// Backend runs on port 5000
 const PORT = 5000;
 
-
-// ==============================
-// MIDDLEWARE (PRE-PROCESSING)
-// ==============================
-
-// Allow requests from frontend (React)
 app.use(cors());
-
-// Automatically parse JSON bodies
 app.use(express.json());
 
-
-// ==============================
-// SOCKET.IO SETUP (REAL-TIME)
-// ==============================
-
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
+// --- INIT DATABASE ---
+sequelize.sync().then(() => {
+    console.log("📂 SQLite Database Synced & Ready.");
+});
 
-// ==============================
-// ROUTE 1: TEXT CHAT API
-// ==============================
-// This is used when user types text in frontend
+// --- API: HISTORY ---
+app.get('/history', async (req, res) => {
+    try {
+        const history = await Chat.findAll({
+            order: [['createdAt', 'DESC']],
+            limit: 50
+        });
+        res.json(history.reverse());
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch history" });
+    }
+});
 
+// --- HELPER: SAVE MSG ---
+const saveMessage = async (role, message) => {
+    try {
+        const msgText = typeof message === 'string' ? message : JSON.stringify(message);
+        await Chat.create({ role, message: msgText });
+    } catch (err) {
+        console.error("❌ DB SAVE ERROR:", err.message);
+    }
+};
+
+// --- ROUTE: CHAT ---
 app.post('/chat', async (req, res) => {
+    const userText = req.body.text; 
+    console.log(`\n📩 Received: "${userText}"`);
 
-  // Extract user text from request body
-  const userText = req.body.text;
-  console.log(`\n📩 Received: "${userText}"`);
+    await saveMessage('user', userText);
 
-  // 1️⃣ Send text to AI Brain (Phi-3 Mini)
-  const decision = await queryOllama(userText);
+    const decision = await queryOllama(userText);
+    
+    let finalResponse = "";
+    if (decision.type === 'system_action') {
+        finalResponse = await executeAction(decision);
+    } else {
+        finalResponse = decision.response || "I am thinking...";
+    }
 
-  // decision example:
-  // {
-  //   type: "system_action",
-  //   intent: "open_app",
-  //   entities: { app: "chrome" }
-  // }
-
-  // 2️⃣ Decide what to do
-  let finalResponse = "";
-
-  if (decision.type === 'system_action') {
-    // If AI wants a system action → execute it
-    finalResponse = await executeAction(decision);
-  } else {
-    // Otherwise just reply as conversation
-    finalResponse = decision.response;
-  }
-
-  // 3️⃣ Send response back to frontend
-  decision.response = finalResponse;
-  res.json(decision);
+    await saveMessage('bot', finalResponse);
+    res.json({ ...decision, response: finalResponse });
 });
 
-
-// ==============================
-// ROUTE 2: VOICE CONTROL (SOCKET)
-// ==============================
-// This handles microphone-based commands
-
+// --- ROUTE: VOICE ---
 io.on('connection', (socket) => {
-  console.log(`⚡ Client Connected: ${socket.id}`);
+    console.log(`⚡ Client Connected: ${socket.id}`);
 
-  // ▶️ Frontend says: "Start Listening"
-  socket.on('start_listening', () => {
-    console.log("🎤 Received Start Command");
+    socket.on('start_listening', () => {
+        console.log("🎤 Received Start Command");
+        startListening(async (recognizedText) => {
+            console.log(`🤖 Voice Command: ${recognizedText}`);
+            socket.emit('voice_input', recognizedText);
+            await saveMessage('user', recognizedText);
 
-    // Start microphone listener
-    startListening(async (recognizedText) => {
-
-      console.log(`🤖 Voice Command: ${recognizedText}`);
-
-      // Send recognized speech to frontend UI
-      socket.emit('voice_input', recognizedText);
-
-      // 1️⃣ Send speech text to AI
-      const decision = await queryOllama(recognizedText);
-
-      // 2️⃣ Execute or reply
-      let botResponse = "";
-
-      if (decision.type === 'system_action') {
-        botResponse = await executeAction(decision);
-      } else {
-        botResponse = decision.response;
-      }
-
-      // 3️⃣ Send AI response back to frontend
-      socket.emit('bot_response', botResponse);
+            const decision = await queryOllama(recognizedText);
+            let botResponse = "";
+            if (decision.type === 'system_action') {
+                botResponse = await executeAction(decision);
+            } else {
+                botResponse = decision.response || "I am listening.";
+            }
+            
+            await saveMessage('bot', botResponse);
+            socket.emit('bot_response', botResponse);
+        });
     });
-  });
 
-  // ⏹️ Frontend says: "Stop Listening"
-  socket.on('stop_listening', () => {
-    console.log("🛑 Stop Command");
-
-    // Dynamically import stop function
-    const { stopListening } = require(
-      path.join(__dirname, '../ai/voiceService')
-    );
-
-    stopListening();
-  });
+    socket.on('stop_listening', () => {
+        const { stopListening } = require(path.join(__dirname, '../ai/voiceService'));
+        stopListening();
+    });
 });
-
-
-// ==============================
-// START SERVER
-// ==============================
 
 server.listen(PORT, () => {
-  console.log(`🚀 DIVA Backend Active on Port ${PORT}`);
-  console.log(`🧠 AI Model: Phi-3 Mini (via Ollama)`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });

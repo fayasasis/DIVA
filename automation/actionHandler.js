@@ -1,151 +1,155 @@
-// actionHandler.js
-//  DIVA Muscles Layer
-// This file EXECUTES system actions decided by the AI brain.
-// No AI logic lives here. This file only "does", never "thinks".
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
-const { exec } = require('child_process'); // Used to run system commands (Windows)
+// 🔗 FIX PATH TO MODEL: Go up one level (..), then into backend/models
+const Note = require('../backend/models/Note'); 
 
-// --------------------------------------------------
-//  Helper Function: Safe PowerShell Executor
-// --------------------------------------------------
-// Why this exists:
-// - Some Windows actions (volume, mute) require PowerShell
-// - PowerShell can freeze or hang
-// - We protect DIVA using a timeout so the app never crashes
-const runPowerShell = (command) => {
+// 🛡️ HELPER: PowerShell
+const runPowerShell = (psCommand) => {
     return new Promise((resolve) => {
-
-        // Start a safety timer (2 seconds max)
-        const timer = setTimeout(() => {
-            console.log("⚠️ PowerShell Timed Out (Continuing safely)");
-            resolve("Done (Timeout)"); // Move on safely
-        }, 2000);
-
-        console.log(`⚡ Running PowerShell: ${command}`);
-
-        // Execute the PowerShell command
-        exec(`powershell -c "${command}"`, (error) => {
-            clearTimeout(timer); // Stop timeout if command finishes
-
-            // We DO NOT crash on errors — assistant must stay alive
-            if (error) {
-                console.warn(`⚠️ PowerShell Error (Non-critical): ${error.message}`);
-                resolve("Action attempted.");
-            } else {
-                resolve("Done.");
-            }
-        });
+        const child = spawn('powershell', [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psCommand
+        ]);
+        let output = '', error = '';
+        child.stdout.on('data', (d) => output += d);
+        child.stderr.on('data', (d) => error += d);
+        child.on('close', (code) => resolve(code === 0 || !error));
     });
 };
 
-// --------------------------------------------------
-//  Main Action Executor
-// --------------------------------------------------
-// This function receives a DECISION from the AI
-// Example decision:
-// {
-//   type: "system_action",
-//   intent: "open_app",
-//   entities: { app: "notepad" }
-// }
+const launchApp = (cmd) => {
+    const s = spawn('cmd', ['/c', 'start', '', cmd], { detached: true, stdio: 'ignore' });
+    s.unref();
+};
+
 async function executeAction(decision) {
+    const rawIntent = (decision.intent || decision.type || "").toLowerCase();
+    const entities = decision.entities || {};
+    const target = (entities.app || entities.name || entities.target || entities.query || "").toLowerCase().trim();
+    const action = (entities.action || entities.command || "").toLowerCase();
 
-    // Extract intent (what to do)
-    const intent = decision.intent;
+    console.log(`🦾 Processing: [${rawIntent}] Action: ${action} | Target: ${target}`);
 
-    // Extract entity safely (what to act on)
-    // Prevents crashes if AI sends incomplete data
-    const entity =
-        (decision.entities &&
-            (decision.entities.app || decision.entities.query || "")) || "";
-
-    console.log(`🦾 Executing Action: ${intent} → "${entity}"`);
-
-    // --------------------------------------------------
-    // OPEN APPLICATIONS
-    // --------------------------------------------------
-    if (intent === 'open_app') {
-
-        // Whitelisted and safe application mappings
+    // --- 1. APP CONTROL ---
+    if (rawIntent.includes('app') || (rawIntent.includes('open') && !rawIntent.includes('url'))) {
         const appMap = {
-            'notepad': 'notepad',
-            'calculator': 'calc',
-            'chrome': 'start chrome',
-            'vscode': 'code',
-            'settings': 'start ms-settings:',
-            'file explorer': 'explorer'
+            'notepad': { exe: 'notepad', proc: 'notepad' },
+            'calculator': { exe: 'calc', proc: 'CalculatorApp' },
+            'chrome': { exe: 'chrome', proc: 'chrome' },
+            'spotify': { exe: 'spotify', proc: 'spotify' },
+            'vs code': { exe: 'code', proc: 'Code' },
+            'edge': { exe: 'msedge', proc: 'msedge' },
+            'explorer': { exe: 'explorer', proc: 'explorer' },
+            'task manager': { exe: 'taskmgr', proc: 'Taskmgr' },
+            'youtube': { exe: 'chrome "youtube.com"', proc: 'chrome' }
         };
+        const appData = appMap[target] || { exe: target, proc: target };
 
-        // If app is known → use safe command
-        // Otherwise → try opening it generically
-        const command =
-            appMap[entity.toLowerCase()] || `start "" "${entity}"`;
-
-        // Execute the command
-        exec(command, (err) => {
-            if (err) console.error("❌ Failed to open app:", err);
-        });
-
-        return `I have opened ${entity} for you.`;
-    }
-
-    // --------------------------------------------------
-    // SYSTEM CONTROLS (Volume / Lock)
-    // --------------------------------------------------
-    else if (intent === 'system_control') {
-
-        const cmd = entity.toLowerCase();
-
-        // Increase system volume
-        if (cmd.includes('volume up')) {
-            await runPowerShell(
-                '$ws = New-Object -ComObject WScript.Shell; $ws.SendKeys([char]175 * 5)'
-            );
-            return "Turning volume up.";
-        }
-
-        // Decrease system volume
-        else if (cmd.includes('volume down')) {
-            await runPowerShell(
-                '$ws = New-Object -ComObject WScript.Shell; $ws.SendKeys([char]174 * 5)'
-            );
-            return "Turning volume down.";
-        }
-
-        // Mute system volume
-        else if (cmd.includes('mute')) {
-            await runPowerShell(
-                '$ws = New-Object -ComObject WScript.Shell; $ws.SendKeys([char]173)'
-            );
-            return "Muted audio.";
-        }
-
-        // Lock Windows screen
-        else if (cmd.includes('lock')) {
-            exec('rundll32.exe user32.dll,LockWorkStation');
-            return "Locking screen.";
+        if (action === 'close') {
+            await runPowerShell(`Stop-Process -Name "${appData.proc}" -Force -ErrorAction SilentlyContinue`);
+            return `Closing ${target}.`;
+        } else if (action === 'restart') {
+            await runPowerShell(`Stop-Process -Name "${appData.proc}" -Force -ErrorAction SilentlyContinue`);
+            await new Promise(r => setTimeout(r, 1500)); 
+            launchApp(appData.exe);
+            return `Restarting ${target}.`;
+        } else {
+            launchApp(appData.exe);
+            return `Opening ${target}.`;
         }
     }
 
-    // --------------------------------------------------
-    // 3️⃣ WEB SEARCH
-    // --------------------------------------------------
-    else if (intent === 'web_search') {
+    // --- 2. WINDOW CONTROL ---
+    else if (rawIntent.includes('window') || rawIntent === 'switch_focus' || action === 'show_desktop') {
+        const finalAction = action || rawIntent; 
+        const windowApi = `
+            $def = '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);'
+            $def += '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);'
+            $type = Add-Type -MemberDefinition $def -Name Win32WindowControl -Namespace Win32Functions -PassThru
+        `;
 
-        // Build Google search URL
-        const url = `https://www.google.com/search?q=${encodeURIComponent(entity)}`;
-
-        // Open browser with search
-        exec(`start chrome "${url}"`);
-
-        return `Searching Google for ${entity}.`;
+        if (finalAction.includes('desktop')) {
+            await runPowerShell(`(New-Object -ComObject Shell.Application).ToggleDesktop()`);
+            return "Toggling desktop.";
+        }
+        if (finalAction.includes('minimize')) {
+            if (target === 'current' || target === '') {
+                await runPowerShell(`(New-Object -ComObject Shell.Application).MinimizeAll()`);
+                return "Minimized all.";
+            }
+            const script = `
+                ${windowApi}
+                $proc = Get-Process | Where-Object { $_.ProcessName -like "*${target}*" -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+                if ($proc) { $type::ShowWindowAsync($proc.MainWindowHandle, 2) }
+            `;
+            await runPowerShell(script);
+            return `Minimizing ${target}.`;
+        }
+        if (finalAction.includes('switch') || finalAction.includes('focus')) {
+            const script = `
+                ${windowApi}
+                $proc = Get-Process | Where-Object { $_.ProcessName -like "*${target}*" -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+                if ($proc) { 
+                    $type::ShowWindowAsync($proc.MainWindowHandle, 9) 
+                    $type::SetForegroundWindow($proc.MainWindowHandle) 
+                }
+            `;
+            await runPowerShell(script);
+            return `Switched to ${target}.`;
+        }
     }
 
-    // --------------------------------------------------
-    // FALLBACK (Unknown Action)
-    // --------------------------------------------------
-    return "I couldn't perform that system action.";
+    // --- 3. SYSTEM CONTROL ---
+    else if (rawIntent.includes('system') || rawIntent.includes('volume')) {
+        const cmd = (entities.command || rawIntent).toLowerCase();
+        const wsDef = '$ws=New-Object -ComObject WScript.Shell;';
+        if (cmd.includes('up')) { await runPowerShell(`${wsDef} $ws.SendKeys([char]175 * 5)`); return "Volume up."; }
+        if (cmd.includes('down')) { await runPowerShell(`${wsDef} $ws.SendKeys([char]174 * 5)`); return "Volume down."; }
+        if (cmd.includes('mute')) { await runPowerShell(`${wsDef} $ws.SendKeys([char]173)`); return "Muted."; }
+        if (cmd.includes('lock')) { await runPowerShell('rundll32.exe user32.dll,LockWorkStation'); return "Locked."; }
+    }
+
+    // --- 4. WEB ---
+    else if (rawIntent.includes('web') || rawIntent.includes('search')) {
+        if (rawIntent.includes('search') || entities.type === 'search') {
+            const url = `https://www.google.com/search?q=${encodeURIComponent(target)}`;
+            launchApp(`chrome "${url}"`);
+            return `Searching Google for ${target}.`;
+        } else {
+            let url = target.includes('.') ? target : target + ".com";
+            launchApp(`chrome "${url}"`);
+            return `Opening ${url}.`;
+        }
+    }
+
+    // --- 5. FILES ---
+    else if (rawIntent.includes('file') || rawIntent.includes('folder')) {
+        let desktopPath = path.join(os.homedir(), 'Desktop');
+        if (!fs.existsSync(desktopPath)) desktopPath = path.join(os.homedir(), 'OneDrive', 'Desktop');
+        const targetPath = path.join(desktopPath, entities.name || "New_Folder");
+
+        if (action.includes('create')) {
+            if (!fs.existsSync(targetPath)) fs.mkdirSync(targetPath);
+            return `Created "${entities.name}".`;
+        } 
+    }
+
+    // --- 6. NOTES (SQLite) ---
+    else if (rawIntent.includes('note')) {
+        try {
+            if (action === 'add' || rawIntent.includes('add')) {
+                await Note.create({ content: entities.content || target });
+                return "Note saved.";
+            } else if (action === 'list' || rawIntent.includes('read')) {
+                const notes = await Note.findAll({ order: [['createdAt', 'DESC']], limit: 5 });
+                return notes.length ? "Recent notes: " + notes.map(n => n.content).join(", ") : "No notes.";
+            }
+        } catch (e) { return "Database error."; }
+    }
+
+    return "Done.";
 }
 
-// Export function so backend can use it
 module.exports = { executeAction };
