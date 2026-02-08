@@ -1,172 +1,185 @@
-/* RESET */
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
-
-body { background-color: #121212; color: white; overflow: hidden; }
-
-/* LAYOUT CONTAINER */
-.app-container {
-    display: flex;
-    height: 100vh; /* Full screen height */
-    width: 100vw;
-    overflow: hidden; /* Prevent scrolling on the container itself */
+:root {
+    --bg-deep: #121212;
+    --neon-cyan: #00ffcc;
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --glass-border: rgba(255, 255, 255, 0.1);
 }
 
-/* --- SIDEBAR (Push Menu) --- */
-.sidebar {
-    width: 0; /* Hidden by default */
-    height: 100%;
-    background: #1a1a1a;
-    transition: width 0.3s ease-in-out; /* Smooth slide animation */
-    overflow: hidden; /* Hide content when closed */
-    border-right: 1px solid #333;
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0; /* Prevent it from getting squashed */
+@layer base {
+    body {
+        background-color: #121212;
+        color: #f1f5f9;
+        font-family: 'Inter', sans-serif;
+    }
 }
 
-/* When open, give it width */
-.sidebar.open { width: 280px; }
-
-.sidebar-header {
-    padding: 20px;
-    background: #0f0f0f;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid #333;
-    min-width: 280px; /* Keep header strictly 280px */
+.glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
 }
 
-.close-btn { background: none; border: none; color: #ff5555; cursor: pointer; font-size: 1.2rem; }
-
-.history-list { 
-    overflow-y: auto; 
-    flex: 1; 
-    padding: 10px; 
-    min-width: 280px; /* Keep content strictly 280px */
+.neon-text-glow {
+    text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
 }
 
-.history-item {
-    font-size: 0.85rem;
-    color: #ccc;
-    padding: 12px;
-    border-bottom: 1px solid #333;
-    display: flex;
-    gap: 10px;
-    cursor: pointer;
-}
-.history-item:hover { background: #252525; }
-.history-item .role { font-size: 1.2rem; }
-
-/* --- MAIN CONTENT --- */
-.main-content {
-    flex: 1; /* Take remaining space */
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    transition: margin-left 0.3s ease-in-out; /* Smooth adjust */
-    min-width: 0; /* Important: Prevents flex child from overflowing */
+.cyan-glow-focus:focus-within {
+    box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+    border-color: var(--neon-cyan);
 }
 
-/* HEADER */
-.header {
-    padding: 15px 20px;
-    background: #1e1e1e;
-    border-bottom: 1px solid #333;
-    display: flex;
-    align-items: center;
-    gap: 15px;
+.mic-ripple {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    animation: ripple 2s infinite;
 }
-.menu-btn {
+
+@keyframes ripple {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+
+    70% {
+        box-shadow: 0 0 0 15px rgba(239, 68, 68, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
-    border: none;
-    color: #00ff88;
-    font-size: 1.8rem;
-    cursor: pointer;
-    transition: 0.2s;
-}
-.menu-btn:hover { transform: scale(1.1); }
-h1 { font-size: 1.2rem; letter-spacing: 1px; white-space: nowrap; }
-
-/* CHAT AREA */
-.chat-area {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    background: #121212;
 }
 
-/* MESSAGES */
-.message {
-    max-width: 70%;
-    padding: 12px 18px;
-    border-radius: 12px;
-    line-height: 1.4;
-    font-size: 0.95rem;
-    word-wrap: break-word; /* Prevent long words breaking layout */
-}
-.user-msg {
-    align-self: flex-end;
-    background: #007bff;
-    color: white;
-    border-bottom-right-radius: 2px;
-}
-.bot-msg {
-    align-self: flex-start;
-    background: #2a2a2a;
-    color: #e0e0e0;
-    border-bottom-left-radius: 2px;
-    border: 1px solid #333;
-}
-.indicator { color: #ff5555; font-size: 0.9rem; align-self: center; margin-top: 10px; }
-
-/* INPUT AREA (Fixed at Bottom) */
-.input-area {
-    background: #1e1e1e;
-    padding: 15px;
-    display: flex;
-    gap: 10px;
-    border-top: 1px solid #333;
-    z-index: 10;
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 204, 0.2);
+    border-radius: 10px;
 }
 
-.input-area input {
-    flex: 1;
-    padding: 12px;
-    border-radius: 25px;
-    border: 1px solid #444;
-    background: #252525;
-    color: white;
-    outline: none;
-    min-width: 0; /* Flexbox safety */
-}
-.input-area input:focus { border-color: #00ff88; }
-
-.mic-btn, .send-btn {
-    width: 45px;
-    height: 45px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    font-size: 1.2rem;
+/* Siri Orb Animation */
+.siri-overlay {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0; /* Don't shrink buttons */
+    background: rgba(0, 0, 0, 0.2);
+    /* Very subtle dimming */
+    backdrop-filter: none;
+    /* No full screen blur */
+    z-index: 50;
+    pointer-events: auto;
+    /* Enable clicks everywhere */
+    cursor: pointer;
 }
 
-.mic-btn { background: #333; color: white; }
-.mic-btn:hover { background: #444; }
-.mic-btn.rec { background: #ff4444; animation: pulse 1.5s infinite; }
+.siri-container {
+    position: relative;
+    width: 180px;
+    /* Slightly larger for the "round area" */
+    height: 180px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    /* Let clicks pass through to overlay */
 
-.send-btn { background: #00ff88; color: black; }
-.send-btn:hover { background: #00cc6a; }
+    /* The "Round Small Area Blur" */
+    background: rgba(18, 18, 18, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
 
-@keyframes pulse {
-    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
-    70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(255, 68, 68, 0); }
-    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+.siri-orb {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.8), rgba(0, 255, 204, 0.4), rgba(0, 100, 255, 0.6), rgba(0, 0, 0, 0.1));
+    box-shadow:
+        0 0 40px rgba(0, 255, 204, 0.4),
+        inset 0 0 40px rgba(0, 255, 204, 0.4);
+    filter: blur(5px);
+    animation: breathe 3s ease-in-out infinite, rotate 10s linear infinite;
+    mix-blend-mode: screen;
+}
+
+.siri-orb::after {
+    content: '';
+    position: absolute;
+    top: -10%;
+    left: -10%;
+    width: 120%;
+    height: 120%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent, rgba(0, 255, 255, 0.5), transparent);
+    animation: spin 3s linear infinite;
+    filter: blur(15px);
+}
+
+.siri-orb-2 {
+    position: absolute;
+    width: 110%;
+    height: 110%;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 0, 255, 0.2), transparent 70%);
+    animation: pulse-color 4s ease-in-out infinite alternate;
+    mix-blend-mode: overlay;
+}
+
+@keyframes breathe {
+
+    0%,
+    100% {
+        transform: scale(0.95);
+        opacity: 0.8;
+    }
+
+    50% {
+        transform: scale(1.05);
+        opacity: 1;
+    }
+}
+
+@keyframes rotate {
+    0% {
+        transform: rotate(0deg) scale(0.95);
+    }
+
+    100% {
+        transform: rotate(360deg) scale(0.95);
+    }
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pulse-color {
+    0% {
+        transform: scale(1);
+        filter: hue-rotate(0deg);
+    }
+
+    100% {
+        transform: scale(1.1);
+        filter: hue-rotate(90deg);
+    }
 }

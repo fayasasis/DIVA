@@ -79,6 +79,12 @@ DIVA is a modular, offline-first Desktop Virtual Assistant capable of hearing, t
 * **Web Search:** "Google [query]" opens Chrome with results.
 
 ---
+Already done
+* [x] **Phase 1:** Basic Text-to-Action.
+* [x] **Phase 2:** Voice Integration (Vosk).
+* [x] **Phase 3:** True AI (Ollama/Phi-3).
+* [x] **Phase 4:** System Controls (PowerShell).
+* [ ] **Phase 5:** Long-term Memory (Database/JSON Storage).
 
 ## 5. Future Roadmap
 * [x] **Phase 1:** Basic Text-to-Action.

@@ -9,6 +9,10 @@ const Chat = sequelize.define('Chat', {
     message: {
         type: DataTypes.TEXT, // TEXT allows longer messages
         allowNull: false
+    },
+    sessionId: {
+        type: DataTypes.INTEGER,
+        allowNull: true // Allow null for backward compatibility or global logs if needed
     }
 }, {
     timestamps: true // Automatically adds createdAt
