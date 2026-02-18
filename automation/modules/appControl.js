@@ -64,6 +64,14 @@ const executeAppAction = async (target, action) => {
     // Open
     if (bestApp) {
         console.log(`Found App: ${bestApp.Name} (${bestApp.AppID})`);
+
+        // 🚀 SMART SWITCH: Try to focus if already running
+        const switchResult = await forceFocusWindow(bestApp.Name);
+        if (switchResult) {
+            return switchResult; // "Switched to X"
+        }
+
+        // If not running, Launch it
         if (bestApp.AppID.includes('!') || bestApp.AppID.includes('.')) {
             await runPowerShell(`Start-Process "shell:AppsFolder\\${bestApp.AppID}"`);
         } else {

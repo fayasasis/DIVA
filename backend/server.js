@@ -105,6 +105,30 @@ app.delete('/sessions/:id', async (req, res) => {
     }
 });
 
+// --- API: EXECUTE PREDICTION ---
+app.post('/api/execute-prediction', async (req, res) => {
+    try {
+        const { prediction } = req.body;
+        console.log("⚡ Executing Prediction:", prediction);
+
+        const target = prediction.next_action || prediction.target;
+        if (!target) return res.status(400).json({ error: "No target" });
+
+        // Reuse Automation Logic
+        const decision = {
+            intent: 'open_app',
+            entities: { app: target }
+        };
+
+        const result = await executeAction(decision);
+        res.json({ success: true, message: result });
+
+    } catch (err) {
+        console.error("Execution Failed:", err);
+        res.status(500).json({ error: "Execution failed" });
+    }
+});
+
 // --- ROUTE: CHAT ---
 app.post('/chat', async (req, res) => {
     const { text, sessionId: reqSessionId } = req.body;

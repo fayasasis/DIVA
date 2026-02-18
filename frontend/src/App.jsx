@@ -13,6 +13,7 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [socket, setSocket] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [prediction, setPrediction] = useState(null); // AI Prediction State
 
   // Sidebar State
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -69,7 +70,21 @@ function App() {
     });
 
     return () => newSocket.disconnect();
-  }, [settings.voiceResponse]); // Re-bind if settings change (not strictly needed for logic but good practice)
+  }, [settings.voiceResponse]); // Re-bind if settings change
+
+  // --- 2.5 ELECTRON IPC LISTENER ---
+  useEffect(() => {
+    if (window.require) {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.on('prediction', (event, data) => {
+        console.log("🔮 Electron Prediction:", data);
+        setPrediction(data);
+      });
+      return () => {
+        ipcRenderer.removeAllListeners('prediction');
+      };
+    }
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -445,21 +460,42 @@ function App() {
                 onKeyDown={e => e.key === 'Enter' && handleSend()}
               />
 
-              {/* SMART ACTION DEMO (Mockup) */}
-              <div className="hidden md:flex items-center gap-2 pl-4 border-l border-white/10 animate-in fade-in slide-in-from-right-8 duration-700">
-                <div className="flex flex-col items-end mr-2">
-                  <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase">Prediction</span>
-                  <span className="text-xs text-[var(--neon-cyan)] font-bold whitespace-nowrap">Open Spotify</span>
+              {/* SMART ACTION PREDICTION */}
+              {prediction && (
+                <div className="hidden md:flex items-center gap-2 pl-4 border-l border-white/10 animate-in fade-in slide-in-from-right-8 duration-700">
+                  <div className="flex flex-col items-end mr-2">
+                    <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase">Suggestion</span>
+                    <span className="text-xs text-[var(--neon-cyan)] font-bold whitespace-nowrap">
+                      {prediction.next_action || prediction.target}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setPrediction(null)}
+                    className="w-9 h-9 rounded-full bg-[#121212] border border-white/10 hover:border-red-500 hover:bg-red-500/10 text-slate-400 hover:text-red-500 flex items-center justify-center transition-all group"
+                    title="Ignore"
+                  >
+                    <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">close</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      // Accept logic: Execute via Backend
+                      console.log("Accepted:", prediction);
+                      try {
+                        await axios.post('http://localhost:5000/api/execute-prediction', { prediction });
+                      } catch (e) {
+                        console.error("Exec failed", e);
+                      }
+                      setPrediction(null);
+                    }}
+                    className="w-9 h-9 rounded-full bg-[#121212] border border-[var(--neon-cyan)]/30 hover:bg-[var(--neon-cyan)] text-[var(--neon-cyan)] hover:text-black flex items-center justify-center transition-all shadow-[0_0_10px_rgba(0,255,204,0.1)] hover:shadow-[0_0_15px_rgba(0,255,204,0.5)] group"
+                    title="Accept"
+                  >
+                    <span className="material-symbols-outlined text-lg font-bold group-hover:scale-110 transition-transform">check</span>
+                  </button>
                 </div>
-
-                <button className="w-9 h-9 rounded-full bg-[#121212] border border-white/10 hover:border-red-500 hover:bg-red-500/10 text-slate-400 hover:text-red-500 flex items-center justify-center transition-all group" title="Ignore">
-                  <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">close</span>
-                </button>
-
-                <button className="w-9 h-9 rounded-full bg-[#121212] border border-[var(--neon-cyan)]/30 hover:bg-[var(--neon-cyan)] text-[var(--neon-cyan)] hover:text-black flex items-center justify-center transition-all shadow-[0_0_10px_rgba(0,255,204,0.1)] hover:shadow-[0_0_15px_rgba(0,255,204,0.5)] group" title="Accept">
-                  <span className="material-symbols-outlined text-lg font-bold group-hover:scale-110 transition-transform">check</span>
-                </button>
-              </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
