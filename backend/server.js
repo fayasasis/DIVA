@@ -10,7 +10,7 @@ const Session = require('./models/Session');
 // --- 🔗 LINKING SIBLING FOLDERS ---
 // We use '../' to step out of 'backend' and into 'ai' or 'automation'
 const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService'));
-const { executeAction } = require(path.join(__dirname, '../automation/actionHandler'));
+const { executeAction } = require(path.join(__dirname, '../automation/index'));
 const { startListening } = require(path.join(__dirname, '../ai/voiceService'));
 
 const app = express();
