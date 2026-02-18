@@ -25,13 +25,25 @@ class BrainHMM:
             
             # Build Matrix
             for i in range(len(actions) - 1):
-                current = actions[i]
-                next_act = actions[i+1]
+                current = self.normalize(actions[i])
+                next_act = self.normalize(actions[i+1])
                 self.learn(current, next_act)
                 
             print(f"[BRAIN] Trained on {len(actions)} historical actions.")
         except Exception as e:
             print(f"[ERROR] Brain Load Failed: {e}")
+
+    def normalize(self, title):
+        if not title: return None
+        # REUSED LOGIC FROM OBSERVER (Ideally shared, but duplicated for safety here)
+        if "Visual Studio Code" in title or "VS Code" in title: return "Visual Studio Code"
+        if "Google Chrome" in title or "Chrome" in title: return "Google Chrome"
+        if "Microsoft Edge" in title or "Edge" in title: return "Microsoft Edge"
+        if "Spotify" in title: return "Spotify"
+        if "Calculator" in title: return "Calculator"
+        if "Notepad" in title: return "Notepad"
+        if "DIVA" in title: return "DIVA Assistant"
+        return title.split(' - ')[-1]
 
     def learn(self, from_action, to_action):
         """Update probability matrix in real-time."""
