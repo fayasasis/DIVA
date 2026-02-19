@@ -17,11 +17,11 @@
 
 ## 2. Directory Structure & Key Files
 
-### 📂 `root` (e:\DIVA)
+### `root` (e:\DIVA)
 *   `package.json`: Project manifest. Defines dependencies and the `start` script (`concurrently "npm run dev" "electron ."`).
 *   `start_diva.bat`: Legacy batch script (mostly superseded by `npm start`).
 
-### 📂 `electron/` (The Application Shell)
+### `electron/` (The Application Shell)
 This layer manages the application lifecycle and native window management.
 
 *   **`main.js`**: **The Core Controller.**
@@ -31,7 +31,7 @@ This layer manages the application lifecycle and native window management.
         2.  **Overlay Window:** Small, transparent, always-on-top window hosting the Prediction Popup (`/overlay`).
     *   **IPC Hub:** Acts as a bridge between the Frontend (React) and the Background Processes (Python/Node). It reads `stdout` from Python, parses JSON predictions, and routes them to the appropriate window via `ipcMain` / `webContents.send`.
 
-### 📂 `frontend/` (The User Interface)
+### `frontend/` (The User Interface)
 Built with **React (Vite)** and **Tailwind CSS**.
 
 *   **`src/main.jsx`**: Application Entry Point. Uses `HashRouter` to manage routing within the Electron file system context.
@@ -52,7 +52,7 @@ Built with **React (Vite)** and **Tailwind CSS**.
         *   **Accept:** Sends IPC 'feedback' -> Main Process AND calls Backend API `/api/execute-prediction` to perform the action.
         *   **Reject:** Dismisses the popup.
 
-### 📂 `backend/` (The Brain & Automation Hub)
+### `backend/` (The Brain & Automation Hub)
 A **Node.js (Express)** server that handles logic, data persistence, and system control.
 
 *   **`server.js`**: **API & Socket Server.**
@@ -69,7 +69,7 @@ A **Node.js (Express)** server that handles logic, data persistence, and system 
     *   **`Session.js`**: Defines chat sessions (Title, Timestamp).
     *   **`Chat.js`**: Defines individual chat messages (Role, Content, SessionID).
 
-### 📂 `ai/` (The Intelligence Layer)
+### `ai/` (The Intelligence Layer)
 Microservices written in Python (for AI/ML libraries) and Node wrappers.
 
 *   **`observer.py`**: **The "Eyes" (Window Tracker).**
@@ -94,7 +94,7 @@ Microservices written in Python (for AI/ML libraries) and Node wrappers.
 *   **`ollamaService.js`**:
     *   Connects to local Ollama instance (Llama 3) to generate chat responses.
 
-### 📂 `automation/` (The Hands)
+### `automation/` (The Hands)
 Executes system actions via PowerShell.
 
 *   **`index.js`**: **Command Dispatcher.**

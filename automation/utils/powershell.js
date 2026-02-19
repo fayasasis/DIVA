@@ -1,6 +1,6 @@
 const { spawn } = require('child_process');
 
-// 🛡️ HELPER: PowerShell Execution
+// HELPER: PowerShell Execution
 const runPowerShell = (psCommand) => {
     return new Promise((resolve) => {
         const child = spawn('powershell', [
@@ -10,13 +10,13 @@ const runPowerShell = (psCommand) => {
         child.stdout.on('data', (d) => output += d);
         child.stderr.on('data', (d) => error += d);
         child.on('close', (code) => {
-            if (error) console.error("❌ PowerShell Error:", error);
+            if (error) console.error("PowerShell Error:", error);
             resolve(code === 0 || !error);
         });
     });
 };
 
-// 🛡️ HELPER: PowerShell with Output
+// HELPER: PowerShell with Output
 const runPowerShellData = (psCommand) => {
     return new Promise((resolve) => {
         const child = spawn('powershell', [

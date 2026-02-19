@@ -1,7 +1,7 @@
 const { runPowerShell } = require('../utils/powershell');
 const { forceFocusWindow } = require('./windowControl');
 
-// 🌐 WEB & MEDIA CONTROL MODULE
+// WEB & MEDIA CONTROL MODULE
 
 const SITE_MAP = {
     'gmail': 'https://mail.google.com',

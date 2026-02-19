@@ -1,7 +1,7 @@
 const MODEL_NAME = "phi3";
 
 async function queryOllama(userText) {
-    console.log(`🧠 AI Thinking (${MODEL_NAME})...`);
+    console.log(`AI Thinking (${MODEL_NAME})...`);
 
     const systemPrompt = `
         You are DIVA, an advanced Desktop Assistant.
@@ -47,7 +47,7 @@ async function queryOllama(userText) {
 
         const data = await response.json();
         const rawText = data.response;
-        console.log("🧠 Raw AI Reply:", rawText);
+        console.log("Raw AI Reply:", rawText);
 
         try {
             // 1. Try direct parsing
@@ -75,7 +75,7 @@ async function queryOllama(userText) {
                 parsed = { type: 'conversation', response: "I am not sure what you want me to do." };
             }
 
-            // --- 2. HEURISTIC OVERRIDE NO. 2: REFUSAL DETECTOR 🚨 ---
+            // --- 2. HEURISTIC OVERRIDE NO. 2: REFUSAL DETECTOR ---
             // If the AI refuses to answer because of "training data cutoff" or "future prediction",
             // we FORCE a web search instead.
             if (parsed.type === 'conversation') {
@@ -92,7 +92,7 @@ async function queryOllama(userText) {
 
                 const responseLower = (parsed.response || "").toLowerCase();
                 if (refusalPhrases.some(phrase => responseLower.includes(phrase))) {
-                    console.log("🛡️ Refusal Detected! Converting to Web Search.");
+                    console.log("Refusal Detected! Converting to Web Search.");
                     return {
                         type: "system_action",
                         intent: "web_search",
@@ -106,12 +106,12 @@ async function queryOllama(userText) {
 
             return parsed;
         } catch (e) {
-            console.warn("⚠️ JSON Parse Failed, using raw text fallback");
+            console.warn("JSON Parse Failed, using raw text fallback");
             // Fallback: If AI replies with plain text, treat it as a conversation
             return { type: "conversation", "response": rawText || "I didn't quite catch that." };
         }
     } catch (error) {
-        console.error("❌ Ollama Error:", error.message);
+        console.error("Ollama Error:", error.message);
         return { type: "conversation", "response": "My brain is offline. Please check if Ollama is running." };
     }
 

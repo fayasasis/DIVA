@@ -44,7 +44,7 @@ const resolvePath = (userPath) => {
 
 const executeFileAction = async (target, action, entities, rawIntent, rawQuery = "") => {
     try {
-        console.log(`📂 File Action: ${action} | Target: ${target}`);
+        console.log(`File Action: ${action} | Target: ${target}`);
 
         // Resolve Target Path
         let targetPath = resolvePath(entities.path || target || entities.source || "New_Folder");

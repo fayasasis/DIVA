@@ -66,8 +66,8 @@ function startListening(callback) {
     // '-u' → unbuffered output (important for real-time voice)
     // cwd → run Python inside this folder
 
-    console.log("🎧 Spawning Python Ears...");
-    
+    console.log("Spawning Python Ears...");
+
     pythonProcess = spawn(
         'python',                // Command to run
         ['-u', scriptPath],      // Arguments
@@ -98,7 +98,7 @@ function startListening(callback) {
 
             // Ignore empty speech
             if (text.length > 0) {
-                console.log(`🗣️ Heard via Python: "${text}"`);
+                console.log(`Heard via Python: "${text}"`);
 
                 // Send text back to backend (server.js)
                 callback(text);
@@ -128,7 +128,7 @@ function startListening(callback) {
     // Runs when Python process stops.
 
     pythonProcess.on('close', (code) => {
-        console.log(`🎧 Python Ears closed (Code ${code})`);
+        console.log(`Python Ears closed (Code ${code})`);
         pythonProcess = null;
     });
 }
@@ -142,7 +142,7 @@ function startListening(callback) {
 
 function stopListening() {
     if (pythonProcess) {
-        console.log("🛑 Killing Python Ears...");
+        console.log("Killing Python Ears...");
         pythonProcess.kill();   // Force stop Python
         pythonProcess = null;
     }

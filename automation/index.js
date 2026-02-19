@@ -22,7 +22,7 @@ async function executeAction(decision, rawQuery = "") {
     const target = extractString(entities.app || entities.name || entities.target || entities.query).toLowerCase().trim();
     let action = extractString(entities.action || entities.command).toLowerCase();
 
-    // 🚨 ROBUSTNESS: If action is missing, try to derive it from the intent OR the raw query
+    // ROBUSTNESS: If action is missing, try to derive it from the intent OR the raw query
     if (!action) {
         const checkSource = (rawIntent + " " + rawQuery).toLowerCase();
 
@@ -38,9 +38,9 @@ async function executeAction(decision, rawQuery = "") {
     // Fallback Query Construction
     const cleanQuery = (rawQuery || `${rawIntent} ${target} ${action}`).toLowerCase();
 
-    console.log(`🦾 Processing: [${rawIntent}] Action: ${action} | Target: ${target} | Raw: "${cleanQuery}"`);
+    console.log(`Processing: [${rawIntent}] Action: ${action} | Target: ${target} | Raw: "${cleanQuery}"`);
 
-    // 🚨 1. Global Heuristic Overrides (Power, Window Verbs)
+    // 1. Global Heuristic Overrides (Power, Window Verbs)
     // Checks for specific keywords that usually trip up the AI
     const sysOverride = await systemControl.handleSystemOverrides(cleanQuery);
     if (sysOverride) return sysOverride;
@@ -48,7 +48,7 @@ async function executeAction(decision, rawQuery = "") {
     const winOverride = await windowControl.handleWindowOverrides(cleanQuery);
     if (winOverride) return winOverride;
 
-    // 🚨 2. Module Routing based on Intent
+    // 2. Module Routing based on Intent
 
     // SPOTIFY/MEDIA OVERRIDE (Route specific app media commands to WebControl)
     if (target === 'spotify' && (cleanQuery.includes('play') || cleanQuery.includes('music'))) {
@@ -61,7 +61,7 @@ async function executeAction(decision, rawQuery = "") {
         if (appResult) return appResult;
 
         // If App Control failed finding an app, treat "Open X" as a Web Search for "X"
-        console.log(`⚠️ App '${target}' not found. Falling back to Web Search.`);
+        console.log(`App '${target}' not found. Falling back to Web Search.`);
         return await webControl.executeWebAction(target, action, entities, cleanQuery);
     }
 

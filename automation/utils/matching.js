@@ -1,4 +1,4 @@
-// 🧠 HELPER: Levenshtein Distance for Fuzzy Matching
+// HELPER: Levenshtein Distance for Fuzzy Matching
 const levenshteinDistance = (a, b) => {
     const matrix = [];
     for (let i = 0; i <= b.length; i++) matrix[i] = [i];
@@ -12,7 +12,7 @@ const levenshteinDistance = (a, b) => {
     return matrix[b.length][a.length];
 };
 
-// 🧠 HELPER: Find Best Match
+// HELPER: Find Best Match
 const findBestMatch = (target, list, key = null) => {
     let bestMatch = null;
     let minDistance = Infinity;

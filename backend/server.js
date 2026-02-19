@@ -7,7 +7,7 @@ const sequelize = require('./config/database');
 const Chat = require('./models/Chat');
 const Session = require('./models/Session');
 
-// --- 🔗 LINKING SIBLING FOLDERS ---
+// --- LINKING SIBLING FOLDERS ---
 // We use '../' to step out of 'backend' and into 'ai' or 'automation'
 const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService'));
 const { executeAction } = require(path.join(__dirname, '../automation/index'));
@@ -30,7 +30,7 @@ Chat.belongsTo(Session, { foreignKey: 'sessionId' });
 
 // --- INIT DATABASE ---
 sequelize.sync().then(() => {
-    console.log("📂 SQLite Database Synced & Ready (Schema Updated).");
+    console.log("SQLite Database Synced & Ready (Schema Updated).");
 });
 
 // --- HELPER: SAVE MSG ---
@@ -39,7 +39,7 @@ const saveMessage = async (sessionId, role, message) => {
         const msgText = typeof message === 'string' ? message : JSON.stringify(message);
         await Chat.create({ sessionId, role, message: msgText });
     } catch (err) {
-        console.error("❌ DB SAVE ERROR:", err.message);
+        console.error("DB SAVE ERROR:", err.message);
     }
 };
 
@@ -58,15 +58,15 @@ app.get('/sessions', async (req, res) => {
 // --- API: GET SPECIFIC SESSION MESSAGES ---
 app.get('/sessions/:id', async (req, res) => {
     try {
-        console.log(`📥 Loading Session ID: ${req.params.id}`);
+        console.log(`Loading Session ID: ${req.params.id}`);
         const chats = await Chat.findAll({
             where: { sessionId: req.params.id },
             order: [['createdAt', 'ASC']]
         });
-        console.log(`✅ Found ${chats.length} messages for Session ${req.params.id}`);
+        console.log(`Found ${chats.length} messages for Session ${req.params.id}`);
         res.json(chats);
     } catch (err) {
-        console.error("❌ Load Error:", err);
+        console.error("Load Error:", err);
         res.status(500).json({ error: "Failed to load chat" });
     }
 });
@@ -84,7 +84,7 @@ app.put('/sessions/:id', async (req, res) => {
 // --- API: DELETE SESSION ---
 app.delete('/sessions/:id', async (req, res) => {
     try {
-        console.log(`🗑️ DELETE Request for Session: ${req.params.id}`);
+        console.log(`DELETE Request for Session: ${req.params.id}`);
 
         // Manual Cascade: Delete messages first to avoid Foreign Key issues if DB strictness varies
         await Chat.destroy({ where: { sessionId: req.params.id } });
@@ -93,14 +93,14 @@ app.delete('/sessions/:id', async (req, res) => {
         const deleted = await Session.destroy({ where: { id: req.params.id } });
 
         if (deleted) {
-            console.log(`✅ Successfully deleted Session ${req.params.id}`);
+            console.log(`Successfully deleted Session ${req.params.id}`);
             res.json({ success: true });
         } else {
-            console.warn(`⚠️ Session ${req.params.id} not found in DB`);
+            console.warn(`Session ${req.params.id} not found in DB`);
             res.status(404).json({ error: "Session not found" });
         }
     } catch (err) {
-        console.error("❌ DELETE FAILED:", err);
+        console.error("DELETE FAILED:", err);
         res.status(500).json({ error: "Failed to delete", details: err.message });
     }
 });
@@ -109,7 +109,7 @@ app.delete('/sessions/:id', async (req, res) => {
 app.post('/api/execute-prediction', async (req, res) => {
     try {
         const { prediction } = req.body;
-        console.log("⚡ Executing Prediction:", prediction);
+        console.log("Executing Prediction:", prediction);
 
         const target = prediction.next_action || prediction.target;
         if (!target) return res.status(400).json({ error: "No target" });
@@ -136,7 +136,7 @@ app.post('/chat', async (req, res) => {
     let isNewSession = false;
     let newTitle = "";
 
-    console.log(`\n📩 Received: "${text}" [Session: ${sessionId || 'NEW'}]`);
+    console.log(`\nReceived: "${text}" [Session: ${sessionId || 'NEW'}]`);
 
     // 1. Create Session if Null
     if (!sessionId) {
@@ -170,7 +170,7 @@ app.post('/chat', async (req, res) => {
 
     // 4. Process AI with History
     const decision = await queryOllama(text, chronologicalHistory);
-    console.log("🤔 Processed AI Decision:", JSON.stringify(decision, null, 2));
+    console.log("Processed AI Decision:", JSON.stringify(decision, null, 2));
 
     let finalResponse = "";
     // Allow 'file_action' or any response that has an explicit 'intent' to be executed
@@ -197,19 +197,19 @@ app.post('/chat', async (req, res) => {
 
 // --- ROUTE: VOICE ---
 io.on('connection', (socket) => {
-    console.log(`⚡ Client Connected: ${socket.id}`);
+    console.log(`Client Connected: ${socket.id}`);
 
     socket.on('start_listening', () => {
-        console.log("🎤 Received Start Command");
+        console.log("Received Start Command");
         startListening(async (recognizedText) => {
-            console.log(`🤖 Voice Command: ${recognizedText}`);
+            console.log(`Voice Command: ${recognizedText}`);
             socket.emit('voice_input', recognizedText);
 
             // 1. Create a Voice Session (for now, voice is atomic/new session per command usually)
             // Or better: try to reuse? For simplicity and to ensure saving, let's create one.
             let sessionId = null;
             try {
-                const session = await Session.create({ title: `🎤 ${recognizedText.slice(0, 20)}...` });
+                const session = await Session.create({ title: `${recognizedText.slice(0, 20)}...` });
                 sessionId = session.id;
             } catch (e) { console.error("Session Create Error", e); }
 
@@ -238,5 +238,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

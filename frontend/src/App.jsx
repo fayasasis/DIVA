@@ -77,7 +77,7 @@ function App() {
     if (window.require) {
       const { ipcRenderer } = window.require('electron');
       ipcRenderer.on('prediction', (event, data) => {
-        console.log("🔮 Electron Prediction:", data);
+        console.log("Electron Prediction:", data);
         setPrediction(data);
       });
       return () => {
@@ -102,7 +102,7 @@ function App() {
 
   const loadSession = async (id) => {
     try {
-      console.log("🖱️ Clicked Session:", id);
+      console.log("Clicked Session:", id);
       // speak("Loading conversation"); // Sonic Debug: Confirm click works
 
       setCurrentSession(id);

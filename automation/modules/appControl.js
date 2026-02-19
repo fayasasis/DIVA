@@ -65,7 +65,7 @@ const executeAppAction = async (target, action) => {
     if (bestApp) {
         console.log(`Found App: ${bestApp.Name} (${bestApp.AppID})`);
 
-        // 🚀 SMART SWITCH: Try to focus if already running
+        // SMART SWITCH: Try to focus if already running
         const switchResult = await forceFocusWindow(bestApp.Name);
         if (switchResult) {
             return switchResult; // "Switched to X"
