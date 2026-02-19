@@ -1,9 +1,18 @@
-const { runPowerShell, runPowerShellData } = require('../utils/powershell');
-const { findBestMatch } = require('../utils/matching');
-const { forceFocusWindow } = require('./windowControl');
+// ==============================
+// APP CONTROL MODULE
+// ==============================
+// Handles launching, closing, and managing installed applications.
+// Uses PowerShell to interact with the Windows Start Menu and Processes.
 
+const { runPowerShell, runPowerShellData } = require('../utils/powershell'); // PS Executors
+const { findBestMatch } = require('../utils/matching');   // Fuzzy String Matching
+const { forceFocusWindow } = require('./windowControl');  // Window Focus Helper
+
+// Cache for the list of installed apps to avoid slow PowerShell calls on every request.
 let appCache = null;
 
+// Manual Alias Map
+// Maps common user nicknames to the official Window App Names.
 const APP_ALIASES = {
     'vscode': 'Visual Studio Code',
     'vs code': 'Visual Studio Code',
@@ -24,68 +33,95 @@ const APP_ALIASES = {
     'spotify': 'Spotify'
 };
 
+/**
+ * Executes Application Actions (Open, Close, Restart)
+ * @param {string} target - The name of the app (e.g., "notepad").
+ * @param {string} action - The action to perform (e.g., "open", "close").
+ */
 const executeAppAction = async (target, action) => {
-    // 1. Resolve Target via Alias
+    // 1. Resolve Target Name via Alias
+    // Check if user said "vscode" and map it to "Visual Studio Code"
     let searchTarget = APP_ALIASES[target] || target;
 
-    // Special Case: Explorer
+    // Special Case: Windows File Explorer
+    // Explorer is special because it's part of the shell, so we launch it directly.
     if (searchTarget === 'explorer') {
         await runPowerShell('Start-Process "explorer"');
         return "Opening File Explorer.";
     }
 
-    // 2. Fetch Apps if not cached
+    // 2. Build App Cache (If Empty)
+    // Runs PowerShell to get a list of all installed Start Menu apps.
     if (!appCache) {
+        // 'Get-StartApps' retrieves Name and AppID (AUMID)
         const json = await runPowerShellData(`Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Depth 1`);
-        try { appCache = JSON.parse(json); } catch (e) { appCache = []; }
+        try {
+            appCache = JSON.parse(json);
+        } catch (e) {
+            appCache = [];
+        }
+
+        // Manually inject common apps that might be missing or hard to find
         appCache.push({ Name: "Visual Studio Code", AppID: "code" });
         appCache.push({ Name: "Google Chrome", AppID: "chrome" });
         appCache.push({ Name: "Microsoft Edge", AppID: "msedge" });
     }
 
-    // 3. Smart Match
+    // 3. Smart Fuzzy Match
+    // Matches "spotfi" -> "Spotify" using Levenshtein distance.
     const bestApp = findBestMatch(searchTarget, appCache, 'Name');
 
-    // Close
+    // --- ACTION: CLOSE APP ---
     if (action === 'close') {
+        // Use best matched name, or raw target if no match
         const procName = bestApp ? bestApp.Name : target;
+        // Stop-Process kills the app. -Force ensures it closes. SilentlyContinue ignores errors if not running.
         await runPowerShell(`Stop-Process -Name "${procName}" -Force -ErrorAction SilentlyContinue`);
         return `Closing ${procName}.`;
     }
 
-    // Restart logic (Simple)
+    // --- ACTION: RESTART APP ---
     if (action === 'restart') {
         const procName = bestApp ? bestApp.Name : target;
+        // Kill it first
         await runPowerShell(`Stop-Process -Name "${procName}" -Force -ErrorAction SilentlyContinue`);
+        // Wait 1.5s to ensure it's fully dead
         await new Promise(r => setTimeout(r, 1500));
-        // Falls through to Open
+        // Code execution falls through to "Open" logic below...
     }
 
-    // Open
+    // --- ACTION: OPEN APP ---
     if (bestApp) {
         console.log(`Found App: ${bestApp.Name} (${bestApp.AppID})`);
 
-        // SMART SWITCH: Try to focus if already running
+        // OPTIMIZATION: Check if already running first!
+        // If running, just switch focus to it instead of spawning a new instance.
         const switchResult = await forceFocusWindow(bestApp.Name);
         if (switchResult) {
-            return switchResult; // "Switched to X"
+            return switchResult; // Returns "Switched to X"
         }
 
-        // If not running, Launch it
+        // If not running, Launch it using Start-Process
+        // logic to handle UWP Apps (AppID contains '!') vs Standard Exe
         if (bestApp.AppID.includes('!') || bestApp.AppID.includes('.')) {
+            // Launch UWP App (like Calculator, Photos)
             await runPowerShell(`Start-Process "shell:AppsFolder\\${bestApp.AppID}"`);
         } else {
+            // Launch Standard App (like Chrome, Code)
             await runPowerShell(`Start-Process "${bestApp.AppID}"`);
         }
 
-        // AGGRESSIVE FOCUS FOR NEWLY OPENED APP
+        // Post-Launch Focus Attempt
+        // Wait 1.5s for window to appear, then force focus to it.
         await new Promise(r => setTimeout(r, 1500));
         await forceFocusWindow(bestApp.Name);
 
         return `Opening ${bestApp.Name}.`;
     } else {
-        // Fallback: Check if it's a file path or known command
-        // If it contains path separators, try opening it as a generic path
+        // --- FALLBACK: GENERIC EXECUTION ---
+        // If not in Start Menu, maybe it's a direct file path or command?
+
+        // Check if it looks like a file path (C:\...)
         if (searchTarget.includes('\\') || searchTarget.includes('/') || searchTarget.includes(':')) {
             try {
                 await runPowerShell(`Start-Process "${searchTarget}"`);
@@ -95,7 +131,8 @@ const executeAppAction = async (target, action) => {
             }
         }
 
-        // If it's just a random word like "BlahBlah", return null so index.js can send it to Web Search
+        // If it's just a random word like "Banana", return null.
+        // The main index.js will see this null and route it to Web Search instead.
         return null;
     }
 };

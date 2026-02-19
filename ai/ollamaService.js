@@ -1,8 +1,15 @@
-const MODEL_NAME = "phi3";
+const MODEL_NAME = "phi3"; // Define the AI model to be used (Phi-3 Mini).
 
+/**
+ * Main function to query the local Ollama AI instance.
+ * @param {string} userText - The input text or command from the user.
+ * @returns {Promise<object>} - The structured JSON response from the AI.
+ */
 async function queryOllama(userText) {
-    console.log(`AI Thinking (${MODEL_NAME})...`);
+    console.log(`AI Thinking (${MODEL_NAME})...`); // Log that AI processing has started.
 
+    // Construct the System Prompt.
+    // This tells the AI exactly how to behave and format its output.
     const systemPrompt = `
         You are DIVA, an advanced Desktop Assistant.
         Analyze the user's input and return strictly ONE JSON object.
@@ -32,52 +39,60 @@ async function queryOllama(userText) {
     `;
 
     try {
-        // Using built-in fetch (Node 18+)
+        // Send a POST request to the local Ollama API.
+        // Node 18+ has built-in fetch, so no external library is needed here.
         const response = await fetch("http://127.0.0.1:11434/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", // HTTP Method
+            headers: { "Content-Type": "application/json" }, // Standard JSON header
             body: JSON.stringify({
-                model: MODEL_NAME,
-                prompt: systemPrompt,
-                stream: false,
-                format: "json",
-                options: { num_predict: 200, temperature: 0.1 }
+                model: MODEL_NAME, // The model we defined earlier
+                prompt: systemPrompt, // The detailed instructions + user input
+                stream: false, // We want the full response at once, not a stream
+                format: "json", // Force Ollama to try and output JSON
+                options: { num_predict: 200, temperature: 0.1 } // Limit output length and creativity (low temp = more deterministic)
             })
         });
 
+        // Parse the HTTP response body as JSON.
         const data = await response.json();
-        const rawText = data.response;
-        console.log("Raw AI Reply:", rawText);
+        const rawText = data.response; // Extract the actual text string from Ollama
+        console.log("Raw AI Reply:", rawText); // Log the raw output for debugging
 
         try {
-            // 1. Try direct parsing
+            // --- PARSING LOGIC ---
+            // The AI might return JSON wrapped in markdown or just plain text.
+
+            // 1. Try direct JSON parsing first.
             let parsed;
             try {
                 parsed = JSON.parse(rawText);
             } catch (e) {
-                // 2. Regex Extraction (Finds the first {...} block)
+                // 2. If direct parsing fails, use Regex to find the first {...} block.
+                // This handles cases where AI adds "Here is your JSON:" prefix.
                 const jsonMatch = rawText.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
-                    parsed = JSON.parse(jsonMatch[0]);
+                    parsed = JSON.parse(jsonMatch[0]); // Parse the extracted JSON string
                 } else {
-                    throw new Error("No JSON found");
+                    throw new Error("No JSON found"); // Throw error if no JSON structure exists
                 }
             }
 
             // --- NORMALIZATION STEP ---
-            // Ensure 'response' key exists if it's a conversation type
+            // Ensure the output format is consistent for the frontend/backend to handle.
+
+            // If it's a conversation type but missing the 'response' key, try to find alternatives.
             if (!parsed.response && parsed.type === 'conversation') {
                 parsed.response = parsed.reply || parsed.message || parsed.answer || parsed.content || parsed.text || "I am here.";
             }
 
-            // If it's a system action but missing critical fields, fallback to conversation
+            // If it's a system action but missing critical intent/entities, fallback to conversation.
             if (parsed.type === 'system_action' && !parsed.intent) {
                 parsed = { type: 'conversation', response: "I am not sure what you want me to do." };
             }
 
             // --- 2. HEURISTIC OVERRIDE NO. 2: REFUSAL DETECTOR ---
-            // If the AI refuses to answer because of "training data cutoff" or "future prediction",
-            // we FORCE a web search instead.
+            // Check if the AI refused to answer because of safety rails or knowledge cutoff.
+            // If so, force a Web Search action instead.
             if (parsed.type === 'conversation') {
                 const refusalPhrases = [
                     "cannot predict",
@@ -91,30 +106,33 @@ async function queryOllama(userText) {
                 ];
 
                 const responseLower = (parsed.response || "").toLowerCase();
+                // Check if the response contains any of the refusal phrases
                 if (refusalPhrases.some(phrase => responseLower.includes(phrase))) {
                     console.log("Refusal Detected! Converting to Web Search.");
                     return {
                         type: "system_action",
                         intent: "web_search",
                         entities: {
-                            query: userText,
+                            query: userText, // Use original user text as search query
                             type: "search"
                         }
                     };
                 }
             }
 
-            return parsed;
+            return parsed; // Return the successfully parsed and normalized object
         } catch (e) {
             console.warn("JSON Parse Failed, using raw text fallback");
-            // Fallback: If AI replies with plain text, treat it as a conversation
+            // Fallback: If AI replies with plain text that isn't JSON, treat it as a conversation response.
             return { type: "conversation", "response": rawText || "I didn't quite catch that." };
         }
     } catch (error) {
+        // Handle Network Errors (e.g., Ollama not running)
         console.error("Ollama Error:", error.message);
         return { type: "conversation", "response": "My brain is offline. Please check if Ollama is running." };
     }
 
 }
 
+// Export the function so it can be used in server.js
 module.exports = { queryOllama };

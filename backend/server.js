@@ -1,41 +1,66 @@
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
-const sequelize = require('./config/database');
-const Chat = require('./models/Chat');
-const Session = require('./models/Session');
+// ==============================
+// BACKEND API SERVER (Node.js + Express)
+// ==============================
+// This is the "Brain Hub" of the application.
+// It orchestrates:
+// 1. API Requests (from Frontend)
+// 2. Database Operations (SQLite)
+// 3. AI Processing (Ollama)
+// 4. Real-time Communication (Socket.IO)
+// 5. Automation Execution (PowerShell)
 
-// --- LINKING SIBLING FOLDERS ---
-// We use '../' to step out of 'backend' and into 'ai' or 'automation'
-const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService'));
-const { executeAction } = require(path.join(__dirname, '../automation/index'));
-const { startListening } = require(path.join(__dirname, '../ai/voiceService'));
+const express = require('express');      // Web Framework for handling HTTP requests
+const cors = require('cors');            // CORS (Cross-Origin Resource Sharing) middleware
+const http = require('http');            // Node.js native HTTP module
+const { Server } = require('socket.io'); // Real-time WebSocket library
+const path = require('path');            // File path utility module
+const sequelize = require('./config/database'); // Import Database Config
+const Chat = require('./models/Chat');          // Import Chat Model
+const Session = require('./models/Session');    // Import Session Model
 
+// --- LINKING SIBLING MODULES ---
+// We import functions from other folders (AI, Automation) to unify logic here.
+const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService')); // AI Wrapper
+const { executeAction } = require(path.join(__dirname, '../automation/index')); // Automation Dispatcher
+const { startListening } = require(path.join(__dirname, '../ai/voiceService')); // Voice Input
+
+// Initialize Express Application
 const app = express();
+
+// Create HTTP Server wrapping the Express app (required for Socket.IO)
 const server = http.createServer(app);
+
+// Define the Port number (5000 is standard for Flask/Node backends)
 const PORT = 5000;
 
-app.use(cors());
-app.use(express.json());
+// MIDDLEWARE SETUP
+app.use(cors());          // Allow requests from React Frontend (different port)
+app.use(express.json());  // Enable parsing of JSON bodies in POST requests
 
+// SOCKET.IO SETUP
+// This enables real-time bidirectional events (e.g., Voice, Notifications)
 const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
+    cors: { origin: "*", methods: ["GET", "POST"] } // Allow all origins for dev
 });
 
-// --- ASSOCIATIONS ---
+// --- DATABASE RELATIONSHIPS ---
+// Define how Tables relate to each other.
+// A Session (Conversation) has many Chat messages.
+// If a Session is deleted, all its Chats are deleted (CASCADE).
 Session.hasMany(Chat, { foreignKey: 'sessionId', onDelete: 'CASCADE' });
 Chat.belongsTo(Session, { foreignKey: 'sessionId' });
 
-// --- INIT DATABASE ---
+// --- DATABASE SYNCHRONIZATION ---
+// This connects to SQLite and creates tables if they don't exist.
 sequelize.sync().then(() => {
     console.log("SQLite Database Synced & Ready (Schema Updated).");
 });
 
-// --- HELPER: SAVE MSG ---
+// --- HELPER FUNCTION: SAVE MESSAGE ---
+// Utility to save a chat message to the database asynchronously.
 const saveMessage = async (sessionId, role, message) => {
     try {
+        // If message is an object (like a JSON action), stringify it first
         const msgText = typeof message === 'string' ? message : JSON.stringify(message);
         await Chat.create({ sessionId, role, message: msgText });
     } catch (err) {
@@ -43,25 +68,31 @@ const saveMessage = async (sessionId, role, message) => {
     }
 };
 
-// --- API: SESSIONS (SIDEBAR) ---
+// ==============================
+// REST API ROUTES
+// ==============================
+
+// --- GET ALL SESSIONS ---
+// Used by the Sidebar to list all conversation history.
 app.get('/sessions', async (req, res) => {
     try {
         const sessions = await Session.findAll({
-            order: [['updatedAt', 'DESC']]
+            order: [['updatedAt', 'DESC']] // Show newest first
         });
-        res.json(sessions);
+        res.json(sessions); // Return array to frontend
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch sessions" });
     }
 });
 
-// --- API: GET SPECIFIC SESSION MESSAGES ---
+// --- GET MESSAGES FOR A SESSION ---
+// Loads the chat history when a user clicks a session in the sidebar.
 app.get('/sessions/:id', async (req, res) => {
     try {
         console.log(`Loading Session ID: ${req.params.id}`);
         const chats = await Chat.findAll({
-            where: { sessionId: req.params.id },
-            order: [['createdAt', 'ASC']]
+            where: { sessionId: req.params.id }, // Filter by Session ID
+            order: [['createdAt', 'ASC']]       // Show oldest to newest
         });
         console.log(`Found ${chats.length} messages for Session ${req.params.id}`);
         res.json(chats);
@@ -71,7 +102,8 @@ app.get('/sessions/:id', async (req, res) => {
     }
 });
 
-// --- API: RENAME SESSION ---
+// --- RENAME SESSION ---
+// Allows user to edit the chat title.
 app.put('/sessions/:id', async (req, res) => {
     try {
         await Session.update({ title: req.body.title }, { where: { id: req.params.id } });
@@ -81,15 +113,16 @@ app.put('/sessions/:id', async (req, res) => {
     }
 });
 
-// --- API: DELETE SESSION ---
+// --- DELETE SESSION ---
+// Deletes a conversation and all its messages.
 app.delete('/sessions/:id', async (req, res) => {
     try {
         console.log(`DELETE Request for Session: ${req.params.id}`);
 
-        // Manual Cascade: Delete messages first to avoid Foreign Key issues if DB strictness varies
+        // Step 1: Delete all messages associated with this session
         await Chat.destroy({ where: { sessionId: req.params.id } });
 
-        // Then delete the session
+        // Step 2: Delete the session entry itself
         const deleted = await Session.destroy({ where: { id: req.params.id } });
 
         if (deleted) {
@@ -105,7 +138,8 @@ app.delete('/sessions/:id', async (req, res) => {
     }
 });
 
-// --- API: EXECUTE PREDICTION ---
+// --- EXECUTE PREDICTION (AI SUGGESTION) ---
+// Called when user clicks "Accept" on a suggestion popup.
 app.post('/api/execute-prediction', async (req, res) => {
     try {
         const { prediction } = req.body;
@@ -114,12 +148,13 @@ app.post('/api/execute-prediction', async (req, res) => {
         const target = prediction.next_action || prediction.target;
         if (!target) return res.status(400).json({ error: "No target" });
 
-        // Reuse Automation Logic
+        // Normalize the prediction into an "Action Decision" format
         const decision = {
             intent: 'open_app',
             entities: { app: target }
         };
 
+        // Execute the action (e.g., Open Calculator)
         const result = await executeAction(decision);
         res.json({ success: true, message: result });
 
@@ -129,7 +164,8 @@ app.post('/api/execute-prediction', async (req, res) => {
     }
 });
 
-// --- ROUTE: CHAT ---
+// --- MAIN CHAT COMPLETION ENDPOINT ---
+// Handles user text input -> AI Processing -> Action Execution -> Response
 app.post('/chat', async (req, res) => {
     const { text, sessionId: reqSessionId } = req.body;
     let sessionId = reqSessionId;
@@ -138,26 +174,31 @@ app.post('/chat', async (req, res) => {
 
     console.log(`\nReceived: "${text}" [Session: ${sessionId || 'NEW'}]`);
 
-    // 1. Create Session if Null
+    // STEP 1: HANDLE NEW SESSIONS
+    // If no sessionId provided, create a new one.
     if (!sessionId) {
         isNewSession = true;
         try {
-            // Generate Title via AI (Strict JSON)
+            // Ask AI to generate a short title based on the first message
             const titleDecision = await queryOllama(`User query: "${text}". Create a short 3-5 word title for this chat session. Return ONLY JSON like this: { "type": "conversation", "response": "Your Title Here" }`);
 
-            // Extract title from the response field
+            // Clean up the response
             newTitle = titleDecision.response.replace(/["']/g, "").trim();
 
-            if (newTitle.length > 50) newTitle = newTitle.slice(0, 50); // Safety cap
+            if (newTitle.length > 50) newTitle = newTitle.slice(0, 50); // Safety limit
         } catch (e) {
+            // Fallback if AI Title Generation fails
             newTitle = text.slice(0, 30) + "...";
         }
 
+        // Save new session to DB
         const session = await Session.create({ title: newTitle });
         sessionId = session.id;
     }
 
-    // 2. Fetch History BEFORE saving new message (to avoid duplication in context)
+    // STEP 2: LOAD CONTEXT (HISTORY)
+    // Fetch last 10 messages to give AI memory context.
+    // We reverse them so they are in chronological order for the LLM.
     const history = await Chat.findAll({
         where: { sessionId },
         order: [['createdAt', 'DESC']],
@@ -165,27 +206,33 @@ app.post('/chat', async (req, res) => {
     });
     const chronologicalHistory = history.reverse();
 
-    // 3. Save User Message
+    // STEP 3: SAVE USER MESSAGE
     await saveMessage(sessionId, 'user', text);
 
-    // 4. Process AI with History
+    // STEP 4: PROCESS WITH AI
+    // We send input + history to Ollama
     const decision = await queryOllama(text, chronologicalHistory);
     console.log("Processed AI Decision:", JSON.stringify(decision, null, 2));
 
     let finalResponse = "";
-    // Allow 'file_action' or any response that has an explicit 'intent' to be executed
+
+    // STEP 5: EXECUTE SYSTEM ACTIONS (IF ANY)
+    // If the AI decides this is a command (e.g., "Open Notepad"), execute it.
     if (decision.type === 'system_action' || decision.type === 'web_search' || decision.type === 'file_action' || decision.intent) {
         finalResponse = await executeAction(decision, text);
     } else {
+        // Otherwise, just reply with text
         finalResponse = decision.response || "I am thinking...";
     }
 
-    // 4. Save Bot Message
+    // STEP 6: SAVE BOT RESPONSE
     await saveMessage(sessionId, 'bot', finalResponse);
 
-    // 5. Update Session Timestamp
-    await Session.update({ changed: 'true' }, { where: { id: sessionId } }); // Triggers updatedAt
+    // STEP 7: UPDATE TIMESTAMP
+    // Mark the session as updated so it moves to the top of the sidebar.
+    await Session.update({ changed: 'true' }, { where: { id: sessionId } });
 
+    // STEP 8: RETURN RESPONSE TO FRONTEND
     res.json({
         ...decision,
         response: finalResponse,
@@ -195,48 +242,60 @@ app.post('/chat', async (req, res) => {
     });
 });
 
-// --- ROUTE: VOICE ---
+// ==============================
+// REAL-TIME SOCKET EVENTS (Voice)
+// ==============================
+
 io.on('connection', (socket) => {
     console.log(`Client Connected: ${socket.id}`);
 
+    // CLIENT LISTENS FOR VOICE START
     socket.on('start_listening', () => {
         console.log("Received Start Command");
+
+        // Start the Python 'ears' service
         startListening(async (recognizedText) => {
             console.log(`Voice Command: ${recognizedText}`);
+
+            // Send captured text back to UI instantly
             socket.emit('voice_input', recognizedText);
 
-            // 1. Create a Voice Session (for now, voice is atomic/new session per command usually)
-            // Or better: try to reuse? For simplicity and to ensure saving, let's create one.
+            // LOGIC SIMILAR TO /chat endpoint, but simplified for voice
             let sessionId = null;
             try {
+                // Create a temporary session for this voice command
                 const session = await Session.create({ title: `${recognizedText.slice(0, 20)}...` });
                 sessionId = session.id;
             } catch (e) { console.error("Session Create Error", e); }
 
-            // 2. Save User Msg
             if (sessionId) await saveMessage(sessionId, 'user', recognizedText);
 
+            // Process with AI
             const decision = await queryOllama(recognizedText);
             let botResponse = "";
+
+            // Execute Actions
             if (decision.type === 'system_action' || decision.type === 'web_search') {
                 botResponse = await executeAction(decision, recognizedText);
             } else {
                 botResponse = decision.response || "I am listening.";
             }
 
-            // 3. Save Bot Msg
             if (sessionId) await saveMessage(sessionId, 'bot', botResponse);
 
+            // Speak/Show Response
             socket.emit('bot_response', botResponse);
         });
     });
 
+    // CLIENT STOPS LISTENING
     socket.on('stop_listening', () => {
         const { stopListening } = require(path.join(__dirname, '../ai/voiceService'));
         stopListening();
     });
 });
 
+// START THE SERVER
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

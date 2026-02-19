@@ -1,96 +1,120 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import SettingsModal from './components/SettingsModal'; // Import Settings
-import './App.css';
+import SettingsModal from './components/SettingsModal'; // Modal Component
+import './App.css'; // Main Styles
+
+// ==============================
+// MAIN APP COMPONENT
+// ==============================
+// This is the root React component handling the entire UI logic.
+// It manages Chat State, Audio Recording, Socket Connections, and User Settings.
 
 function App() {
-  // --- 1. STATE ---
-  const [messages, setMessages] = useState([]); // Current Chat Messages
-  const [sessions, setSessions] = useState([]); // List of Chat Sessions
-  const [currentSession, setCurrentSession] = useState(null); // Active Session ID
-  const [inputText, setInputText] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [socket, setSocket] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [prediction, setPrediction] = useState(null); // AI Prediction State
+  // --- 1. STATE MANAGEMENT ---
 
-  // Sidebar State
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Chat & Session Data
+  const [messages, setMessages] = useState([]);       // Array of current chat messages
+  const [sessions, setSessions] = useState([]);       // List of past conversations (Sidebar)
+  const [currentSession, setCurrentSession] = useState(null); // ID of active session (Null = New Chat)
 
-  // Settings State
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // Input Handling
+  const [inputText, setInputText] = useState("");     // Text area input
+  const [isRecording, setIsRecording] = useState(false); // Is Microphone active?
+  const [socket, setSocket] = useState(null);         // Socket.IO client instance
+
+  // UI Toggles
+  const [showHistory, setShowHistory] = useState(false); // Mobile Sidebar Toggle
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false); // Desktop Sidebar Collapse
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false); // Settings Modal Toggle
+
+  // AI Intelligence
+  const [prediction, setPrediction] = useState(null); // Smart Action Prediction Data from Electron
+
+  // Settings Configuration (Persisted in LocalStorage)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('diva_settings');
     return saved ? JSON.parse(saved) : {
-      userName: 'JD',
-      location: 'Kochi, Kerala',
-      browser: 'Chrome',
+      userName: 'JD',             // User Name for UI
+      location: 'Kochi, Kerala',  // Location (Context)
+      browser: 'Chrome',          // Default Browser Preference
       windowMode: 'normal',
       transparency: true,
       alwaysOnTop: true,
       minimizeToTray: true,
-      voiceResponse: true,
+      voiceResponse: true,        // Enable TTS
       micInput: 'Default',
       wakeWordSensitivity: 5,
-      speakingRate: 1.0,
-      smartPredictions: true,
+      speakingRate: 1.0,          // TTS Speed
+      smartPredictions: true,     // Enable AI Suggestions
       safeMode: true,
       showLogs: false
     };
   });
 
-  // Persist Settings
+  // Effect: Save settings whenever they change
   useEffect(() => {
     localStorage.setItem('diva_settings', JSON.stringify(settings));
   }, [settings]);
 
-  // Editing State
+  // Session Editing State (Renaming Logic)
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
 
+  // Refs for scrolling to bottom of chat
   const chatEndRef = useRef(null);
 
-  // ... (Effect Hooks remain same) ...
-
-  // --- 2. SETUP ---
+  // --- 2. INITIALIZATION & SOCKET SETUP ---
   useEffect(() => {
+    // Connect to Backend WebSocket Server
     const newSocket = io('http://localhost:5000');
     setSocket(newSocket);
 
-    // Initial Load
-    fetchSessions(); // Load sidebar
-    startNewChat();  // Start with empty screen or load most recent? Let's start empty.
+    // Initial Data Fetch
+    fetchSessions(); // Load Sidebar
+    startNewChat();  // Reset UI
 
+    // Socket Event: Real-time Voice Transcription
     newSocket.on('voice_input', (text) => addMessage('user', text));
+
+    // Socket Event: AI Response (Voice Mode)
     newSocket.on('bot_response', (text) => {
       addMessage('bot', text);
-      if (settings.voiceResponse) speak(text); // Respect Settings
-      fetchSessions(); // Update sidebar order
+      if (settings.voiceResponse) speak(text); // Speak if enabled
+      fetchSessions(); // Refresh order (Newest first)
     });
 
+    // Cleanup on unmount
     return () => newSocket.disconnect();
-  }, [settings.voiceResponse]); // Re-bind if settings change
+  }, [settings.voiceResponse]); // Re-run if voice setting changes
 
-  // --- 2.5 ELECTRON IPC LISTENER ---
+  // --- 2.5 ELECTRON IPC LISTENER (Desktop App Only) ---
+  // Listens for 'prediction' events sent from the Python Observer via Main Process
   useEffect(() => {
-    if (window.require) {
+    if (window.require) { // Check if running in Electron
       const { ipcRenderer } = window.require('electron');
-      ipcRenderer.on('prediction', (event, data) => {
+
+      const handlePrediction = (event, data) => {
         console.log("Electron Prediction:", data);
-        setPrediction(data);
-      });
+        setPrediction(data); // Display suggestion bubble
+      };
+
+      ipcRenderer.on('prediction', handlePrediction);
+
       return () => {
-        ipcRenderer.removeAllListeners('prediction');
+        ipcRenderer.removeListener('prediction', handlePrediction);
       };
     }
   }, []);
 
+  // Effect: Auto-scroll to latest message
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- 3. API CALLS ---
+  // --- 3. API INTERACTIONS ---
+
+  // Fetch all chat sessions for sidebar
   const fetchSessions = async () => {
     try {
       const res = await axios.get('http://localhost:5000/sessions');
@@ -98,55 +122,51 @@ function App() {
     } catch (err) { console.error("No sessions"); }
   };
 
-  // ... (loadSession, startNewChat, deleteSession, startRenaming, saveRename remain exactly same) ...
-
+  // Load a specific chat history
   const loadSession = async (id) => {
     try {
-      console.log("Clicked Session:", id);
-      // speak("Loading conversation"); // Sonic Debug: Confirm click works
-
       setCurrentSession(id);
-      setIsSidebarCollapsed(false); // Auto-expand when clicking a chat
-
+      setIsSidebarCollapsed(false); // Auto-expand sidebar
       const res = await axios.get(`http://localhost:5000/sessions/${id}`);
 
-      // Map API messages to UI format
+      // Map DB format to UI State format
       const uiMessages = res.data.map(m => ({
         sender: m.role,
         text: m.message
       }));
       setMessages(uiMessages);
-      setShowHistory(false); // Close mobile menu if open
-
+      setShowHistory(false); // Close mobile drawer
     } catch (err) {
-      console.error("Load failed", err);
-      alert("Failed to load chat: " + err.message); // Visible Error
+      alert("Failed to load chat: " + err.message);
     }
   };
 
+  // Reset to empty chat state
   const startNewChat = () => {
     setCurrentSession(null);
     setMessages([{ sender: 'bot', text: 'Hello! I am ready. Click the mic or type.' }]);
     setShowHistory(false);
-    setIsSidebarCollapsed(false); // Auto-expand for new chat
+    setIsSidebarCollapsed(false);
   };
 
+  // Delete a session
   const deleteSession = async (e, id) => {
-    e.stopPropagation(); // Don't trigger load
+    e.stopPropagation(); // Prevent click event bubbling to Parent (Load Session)
     if (!window.confirm("Delete this chat?")) return;
 
-    // Optimistic UI Update: Remove immediately
+    // Optimistic Update: Remove from UI immediately
     setSessions(prev => prev.filter(s => s.id !== id));
     if (currentSession === id) startNewChat();
 
+    // API Call
     try {
       await axios.delete(`http://localhost:5000/sessions/${id}`);
     } catch (err) {
-      console.error("Delete failed", err);
-      fetchSessions(); // Revert on error
+      fetchSessions(); // Re-fetch if failed
     }
   };
 
+  // Rename Session Handlers
   const startRenaming = (e, session) => {
     e.stopPropagation();
     setEditingSessionId(session.id);
@@ -161,33 +181,36 @@ function App() {
     }
   };
 
+  // Helper to add message to local state
   const addMessage = (sender, text) => {
     setMessages(prev => [...prev, { sender, text }]);
   };
 
-  // --- TTS STATE ---
+  // --- 4. TEXT-TO-SPEECH (TTS) ENGINE ---
+  // A Custom React implementation of Web Speech API with visual progress bar support.
   const [ttsState, setTtsState] = useState('idle'); // 'idle', 'playing', 'paused'
   const [ttsProgress, setTtsProgress] = useState(0);
   const ttsIntervalRef = useRef(null);
 
   const speak = (text) => {
-    window.speechSynthesis.cancel();
+    window.speechSynthesis.cancel(); // Stop current
     clearInterval(ttsIntervalRef.current);
     setTtsProgress(0);
 
     const u = new SpeechSynthesisUtterance(text);
     u.rate = settings.speakingRate;
 
-    // ESTIMATE DURATION (Avg 150 words/min -> 2.5 words/sec)
-    // Adjust for rate: 2.5 * rate words/sec
+    // ALGORITHM: Progress Bar Estimation
+    // Since Web Speech API doesn't give duration, we estimate it based on word count.
     const wordCount = text.split(/\s+/).length;
-    const wordsPerSec = 2.5 * settings.speakingRate;
-    const estimatedDurationSec = Math.max(wordCount / wordsPerSec, 2); // Min 2 sec
+    const wordsPerSec = 2.5 * settings.speakingRate; // Avg speaking speed
+    const estimatedDurationSec = Math.max(wordCount / wordsPerSec, 2); // Min 2 seconds
     const updateIntervalMs = 100;
     const progressStep = 100 / (estimatedDurationSec * (1000 / updateIntervalMs));
 
     u.onstart = () => {
       setTtsState('playing');
+      // Start Progress Loop
       ttsIntervalRef.current = setInterval(() => {
         setTtsProgress(prev => {
           if (prev >= 100) {
@@ -211,22 +234,14 @@ function App() {
   const pauseTTS = () => {
     window.speechSynthesis.pause();
     setTtsState('paused');
-    clearInterval(ttsIntervalRef.current); // Pause progress
+    clearInterval(ttsIntervalRef.current);
   };
 
   const resumeTTS = () => {
     window.speechSynthesis.resume();
     setTtsState('playing');
-    // Resume progress (simple approximation: restart interval)
-    // Ideally we track remaining time, but for visual feedback this is okay
-    // Re-calculating properly is complex without native duration, so we just continue adding step
-    // But we need the 'progressStep' variable... 
-    // Simplified: Just restart the same interval logic?
-    // We lost 'progressStep' scope. Let's strict to simple UI resume for now or execute speak again? 
-    // No, resume works. For the bar, let's just leave it paused visually or accept it might desync slightly.
-    // Better: Re-launch interval with fixed slow increment if we really want, or just let it stay static until next update?
-    // Let's keep it simple: On resume, we won't re-animate the bar perfectly, but the audio resumes.
-    // ACTUALLY: Let's store estimated duration in a ref to handle this better if needed.
+    // Note: Re-animating the bar perfectly on resume is complex without known duration remaining.
+    // For now, it resumes audio but bar stays static until next new speech.
   };
 
   const stopTTS = () => {
@@ -236,46 +251,53 @@ function App() {
     clearInterval(ttsIntervalRef.current);
   };
 
-  // ... (handleSend, toggleMic same) ...
+  // --- 5. MAIN INTERACTION HANDLERS ---
 
+  // Handle Text Submission
   const handleSend = async () => {
     if (!inputText.trim()) return;
     const originalText = inputText;
+
     addMessage('user', originalText);
-    setInputText("");
+    setInputText(""); // Clear input
 
     try {
       const payload = { text: originalText };
       if (currentSession) payload.sessionId = currentSession;
 
+      // API Call to Backend
       const res = await axios.post('http://localhost:5000/chat', payload);
 
       const botText = res.data.response || "Done";
       addMessage('bot', botText);
-      if (settings.voiceResponse) speak(botText); // Respect Setting
+      if (settings.voiceResponse) speak(botText);
 
-      // Handle New Session Creation
+      // Update Session ID if it was a new chat
       if (res.data.isNewSession) {
         setCurrentSession(res.data.sessionId);
-        fetchSessions(); // Refresh sidebar to show new chat
-      } else {
-        // Just re-sort list if needed (updatedAt)
-        fetchSessions();
       }
+      fetchSessions(); // Refresh list
 
     } catch (e) { console.error(e); }
   };
 
+  // Toggle Voice Recording
   const toggleMic = () => {
     if (!socket) return;
-    if (isRecording) { socket.emit('stop_listening'); setIsRecording(false); }
-    else { socket.emit('start_listening'); setIsRecording(true); }
+    if (isRecording) {
+      socket.emit('stop_listening');
+      setIsRecording(false);
+    } else {
+      socket.emit('start_listening');
+      setIsRecording(true);
+    }
   };
 
+  // --- 6. RENDER UI ---
   return (
     <div className="h-screen overflow-hidden flex bg-[#121212]">
 
-      {/* SETTINGS MODAL */}
+      {/* COMPONENT: Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -283,10 +305,10 @@ function App() {
         setSettings={setSettings}
       />
 
-      {/* SIDEBAR */}
+      {/* COMPONENT: Sidebar */}
       <aside className={`glass-panel border-r border-white/10 flex flex-col h-full transition-all duration-300 z-20 absolute md:relative ${isSidebarCollapsed ? 'w-20' : 'w-72'} ${!showHistory ? '-translate-x-full md:translate-x-0' : 'translate-x-0'}`}>
 
-        {/* Header with Hamburger */}
+        {/* Sidebar Header */}
         <div className={`p-4 border-b border-white/10 flex items-center bg-black/20 ${isSidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
           {!isSidebarCollapsed && <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Chats</span>}
           <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="text-slate-500 hover:text-white transition-colors">
@@ -294,6 +316,7 @@ function App() {
           </button>
         </div>
 
+        {/* New Chat Button */}
         <div className="p-4">
           <button onClick={startNewChat} className={`flex items-center gap-3 p-3 rounded-xl bg-[var(--neon-cyan)]/10 text-[var(--neon-cyan)] hover:bg-[var(--neon-cyan)]/20 transition-all border border-[var(--neon-cyan)]/20 shadow-lg shadow-[var(--neon-cyan)]/5 ${isSidebarCollapsed ? 'justify-center w-full' : 'w-full'}`}>
             <span className="material-symbols-outlined">add</span>
@@ -301,6 +324,7 @@ function App() {
           </button>
         </div>
 
+        {/* Session List */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
           {sessions.length === 0 && !isSidebarCollapsed && <p className="text-[10px] text-slate-600 text-center mt-10">No recent chats</p>}
 
@@ -309,14 +333,13 @@ function App() {
               key={session.id}
               className={`group p-3 rounded-lg cursor-pointer border transition-all relative ${currentSession === session.id ? 'bg-white/10 border-[var(--neon-cyan)]/40' : 'bg-transparent border-transparent hover:bg-white/5'} ${isSidebarCollapsed ? 'flex justify-center' : ''}`}
               onClick={() => loadSession(session.id)}
-              title={session.title} // Tooltip for collapsed mode
+              title={session.title}
             >
               {isSidebarCollapsed ? (
-                // Collapsed Icon View
                 <span className={`material-symbols-outlined text-[18px] ${currentSession === session.id ? 'text-[var(--neon-cyan)]' : 'text-slate-500'}`}>chat_bubble</span>
               ) : (
-                // Expanded Full View
                 editingSessionId === session.id ? (
+                  // Editing Mode Input
                   <input
                     autoFocus
                     className="bg-transparent border-b border-[var(--neon-cyan)] text-white text-sm w-full outline-none pb-1"
@@ -334,7 +357,7 @@ function App() {
                       {!isSidebarCollapsed && <span>{new Date(session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
                     </p>
 
-                    {/* Hover Actions */}
+                    {/* Action Buttons (Edit/Delete) */}
                     <div className="absolute right-2 top-3 opacity-0 group-hover:opacity-100 flex gap-1 bg-[#1e1e1e] p-1 rounded shadow-xl">
                       <button onClick={(e) => startRenaming(e, session)} className="text-slate-400 hover:text-blue-400 p-1"><span className="material-symbols-outlined text-[14px]">edit</span></button>
                       <button onClick={(e) => deleteSession(e, session.id)} className="text-slate-400 hover:text-red-500 p-1"><span className="material-symbols-outlined text-[14px]">delete</span></button>
@@ -347,9 +370,9 @@ function App() {
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
+      {/* Main Chat Interface */}
       <main className="flex-1 flex flex-col relative overflow-hidden bg-[radial-gradient(circle_at_center,_#1a1a1a_0%,_#121212_100%)]">
-        {/* HEADER */}
+        {/* Header Bar */}
         <header className="h-16 flex items-center justify-between px-8 glass-panel border-b border-white/10 z-10 relative">
           <div className="flex items-center gap-6">
             <button className="text-slate-400 hover:text-[var(--neon-cyan)] transition-colors md:hidden" onClick={() => setShowHistory(!showHistory)}>
@@ -361,12 +384,10 @@ function App() {
             </div>
           </div>
 
-          {/* Chat Title (Centered) */}
           <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 flex items-center gap-2">
             <span className="text-slate-200 font-medium text-sm truncate max-w-[200px] md:max-w-md">
               {sessions.find(s => s.id === currentSession)?.title || "New Chat"}
             </span>
-            <span className="material-symbols-outlined text-slate-500 text-sm">expand_more</span>
           </div>
 
           <div className="flex items-center gap-4">
@@ -380,7 +401,7 @@ function App() {
           </div>
         </header>
 
-        {/* CHAT AREA */}
+        {/* Message Viewport */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pb-32">
           <div className="max-w-4xl mx-auto space-y-8">
 
@@ -395,7 +416,7 @@ function App() {
                   {msg.sender === 'user' ? 'JD' : <span className="material-symbols-outlined">auto_awesome</span>}
                 </div>
 
-                {/* Bubble */}
+                {/* Message Bubble */}
                 <div className={`max-w-[80%] p-5 shadow-lg ${msg.sender === 'user'
                   ? 'bg-gradient-to-br from-[var(--neon-cyan)]/20 to-blue-600/20 border border-[var(--neon-cyan)]/30 rounded-2xl rounded-tr-none text-white'
                   : 'glass-panel rounded-2xl rounded-tl-none text-slate-200'
@@ -406,6 +427,7 @@ function App() {
               </div>
             ))}
 
+            {/* Recording Animation Overlay */}
             {isRecording && (
               <div className="siri-overlay" onClick={toggleMic}>
                 <div className="siri-container">
@@ -420,12 +442,12 @@ function App() {
           </div>
         </div>
 
-        {/* INPUT AREA */}
+        {/* Input & Control Area */}
         <div
           className="absolute bottom-0 left-0 right-0 p-8 backdrop-blur-2xl z-20"
           style={{ maskImage: 'linear-gradient(to bottom, transparent, black 20%)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 20%)' }}
         >
-          {/* TTS MINI PLAYER */}
+          {/* Audio Player Controls (When TTS is active) */}
           {ttsState !== 'idle' && (
             <div className="max-w-4xl mx-auto mb-4 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2">
               <div className="flex-1 bg-white/5 rounded-full h-1 overflow-hidden">
@@ -447,10 +469,8 @@ function App() {
 
           <div className="max-w-4xl mx-auto flex items-center gap-4">
 
-            {/* Input Container - Cleaned up for future Smart Predictions */}
+            {/* Text Input & Predictions */}
             <div className="flex-1 glass-panel rounded-full h-16 px-6 flex items-center gap-4 border-white/20 transition-all duration-300 cyan-glow-focus bg-[#121212]/50">
-              {/* Left Side: Empty for now (Ideal for 'Smart Suggestion' Icon later) */}
-
               <input
                 className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-slate-500 text-base outline-none"
                 placeholder="Type your command..."
@@ -460,7 +480,7 @@ function App() {
                 onKeyDown={e => e.key === 'Enter' && handleSend()}
               />
 
-              {/* SMART ACTION PREDICTION */}
+              {/* AI Suggestion Chip */}
               {prediction && (
                 <div className="hidden md:flex items-center gap-2 pl-4 border-l border-white/10 animate-in fade-in slide-in-from-right-8 duration-700">
                   <div className="flex flex-col items-end mr-2">
@@ -470,6 +490,7 @@ function App() {
                     </span>
                   </div>
 
+                  {/* Reject Button */}
                   <button
                     onClick={() => setPrediction(null)}
                     className="w-9 h-9 rounded-full bg-[#121212] border border-white/10 hover:border-red-500 hover:bg-red-500/10 text-slate-400 hover:text-red-500 flex items-center justify-center transition-all group"
@@ -478,10 +499,9 @@ function App() {
                     <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">close</span>
                   </button>
 
+                  {/* Accept Button */}
                   <button
                     onClick={async () => {
-                      // Accept logic: Execute via Backend
-                      console.log("Accepted:", prediction);
                       try {
                         await axios.post('http://localhost:5000/api/execute-prediction', { prediction });
                       } catch (e) {
@@ -498,6 +518,7 @@ function App() {
               )}
             </div>
 
+            {/* Mic & Send Buttons */}
             <div className="flex items-center gap-3">
               <button onClick={toggleMic} className={`w-16 h-16 rounded-full flex items-center justify-center active:scale-95 transition-transform shadow-lg ${isRecording ? 'bg-red-500 text-white mic-ripple shadow-red-500/20' : 'bg-slate-700 text-white hover:bg-slate-600'}`}>
                 <span className="material-symbols-outlined text-2xl">{isRecording ? 'stop' : 'mic'}</span>

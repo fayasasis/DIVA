@@ -28,8 +28,8 @@ const path = require('path');
 // ------------------------------
 // GLOBAL VARIABLE
 // ------------------------------
-// Holds the running Python process.
-// If this is NOT null → microphone is already active.
+// Holds the running Python process instance.
+// If this is NOT null → it means the microphone is currently active.
 let pythonProcess = null;
 
 
@@ -37,15 +37,14 @@ let pythonProcess = null;
 // START LISTENING FUNCTION
 // ------------------------------
 // This function:
-// 1. Starts the Python speech-recognition script
-// 2. Listens to its output
-// 3. Sends recognized speech back using a callback
+// 1. Starts the Python speech-recognition script (ears.py)
+// 2. Listens to its standard output (stdout)
+// 3. Sends recognized speech back using a callback function
 //
-// callback(text) → called whenever speech is recognized
-
+// @param {function} callback - Function to call when text is recognized (callback(text))
 function startListening(callback) {
 
-    // Prevent starting multiple microphone listeners
+    // Prevent starting multiple microphone listeners at the same time
     if (pythonProcess) return;
 
 
@@ -53,59 +52,60 @@ function startListening(callback) {
     // STEP 1: LOCATE PYTHON SCRIPT
     // ==============================
     // ears.py is the Python file that:
-    // - Listens to microphone
-    // - Uses Vosk
-    // - Prints recognized text
-
+    // - Listens to microphone input using PyAudio
+    // - Uses Vosk model to transcribe audio
+    // - Prints recognized text to the console
     const scriptPath = path.join(__dirname, 'ears.py');
 
 
     // ==============================
     // STEP 2: SPAWN PYTHON PROCESS
     // ==============================
-    // '-u' → unbuffered output (important for real-time voice)
-    // cwd → run Python inside this folder
+    // We run the python command with the script path.
+    // '-u' flag means unbuffered output (important for real-time voice streaming)
+    // cwd sets the current working directory to this file's folder
 
     console.log("Spawning Python Ears...");
 
     pythonProcess = spawn(
-        'python',                // Command to run
-        ['-u', scriptPath],      // Arguments
-        { cwd: __dirname }       // Working directory
+        'python',                // Command to run Python
+        ['-u', scriptPath],      // Arguments: unbuffered mode + script file
+        { cwd: __dirname }       // Working directory: e:\DIVA\ai
     );
 
 
     // ==============================
     // STEP 3: LISTEN TO PYTHON OUTPUT
     // ==============================
-    // Python prints text to stdout.
-    // Node.js receives it here.
+    // Python prints text to stdout (standard output).
+    // Node.js receives it here via the 'data' event.
 
     pythonProcess.stdout.on('data', (data) => {
 
-        // Convert raw buffer → readable string
+        // Convert the raw binary buffer → readable string
         const output = data.toString();
 
 
-        // We look for a special marker printed by Python
-        // Example: "RECOGNIZED: open notepad"
+        // We look for a special marker printed by our Python script
+        // Example output from Python: "RECOGNIZED: open notepad"
         if (output.includes('RECOGNIZED:')) {
 
-            // Extract only the spoken text
+            // Extract only the spoken text part
+            // Split by the marker and take the second part (index 1)
             const text = output
                 .split('RECOGNIZED:')[1]
-                .trim();
+                .trim(); // Remove leading/trailing whitespace
 
-            // Ignore empty speech
+            // Ignore empty speech or noise
             if (text.length > 0) {
                 console.log(`Heard via Python: "${text}"`);
 
-                // Send text back to backend (server.js)
+                // Send the text back to backend (server.js) via the callback
                 callback(text);
             }
 
         } else {
-            // Normal Python logs (status messages)
+            // If it's not a recognized text, it's likely a log message from Python
             console.log(`[Python Log]: ${output.trim()}`);
         }
     });
@@ -114,8 +114,8 @@ function startListening(callback) {
     // ==============================
     // STEP 4: HANDLE PYTHON ERRORS
     // ==============================
-    // If Python crashes or throws errors,
-    // we log them here.
+    // If Python crashes or throws errors to stderr (standard error),
+    // we capture and log them here for debugging.
 
     pythonProcess.stderr.on('data', (data) => {
         console.error(`[Python Error]: ${data}`);
@@ -125,11 +125,11 @@ function startListening(callback) {
     // ==============================
     // STEP 5: CLEANUP WHEN CLOSED
     // ==============================
-    // Runs when Python process stops.
+    // This event runs when the Python process stops or exits.
 
     pythonProcess.on('close', (code) => {
         console.log(`Python Ears closed (Code ${code})`);
-        pythonProcess = null;
+        pythonProcess = null; // Reset the variable so we can start again later
     });
 }
 
@@ -138,13 +138,13 @@ function startListening(callback) {
 // STOP LISTENING FUNCTION
 // ------------------------------
 // This completely shuts down the Python process.
-// Used when user clicks "Stop Mic".
+// Used when the user clicks "Stop Mic" in the frontend.
 
 function stopListening() {
     if (pythonProcess) {
         console.log("Killing Python Ears...");
-        pythonProcess.kill();   // Force stop Python
-        pythonProcess = null;
+        pythonProcess.kill();   // Forcefully stop the Python process
+        pythonProcess = null;   // Clear the reference
     }
 }
 
@@ -152,7 +152,7 @@ function stopListening() {
 // ------------------------------
 // EXPORT FUNCTIONS
 // ------------------------------
-// Allows server.js to control the microphone
+// Allows other files (like server.js) to import and use these functions.
 module.exports = {
     startListening,
     stopListening
