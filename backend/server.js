@@ -17,12 +17,14 @@ const path = require('path');            // File path utility module
 const sequelize = require('./config/database'); // Import Database Config
 const Chat = require('./models/Chat');          // Import Chat Model
 const Session = require('./models/Session');    // Import Session Model
+const SemanticCache = require('./models/SemanticCache'); // Import Semantic Cache Model
 
 // --- LINKING SIBLING MODULES ---
 // We import functions from other folders (AI, Automation) to unify logic here.
 const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService')); // AI Wrapper
 const { executeAction } = require(path.join(__dirname, '../automation/index')); // Automation Dispatcher
 const { startListening } = require(path.join(__dirname, '../ai/voiceService')); // Voice Input
+const { getTextVector, cosineSimilarity } = require('./utils/embedding'); // Semantic Cache Math
 
 // Initialize Express Application
 const app = express();
@@ -209,12 +211,55 @@ app.post('/chat', async (req, res) => {
     // STEP 3: SAVE USER MESSAGE
     await saveMessage(sessionId, 'user', text);
 
-    // STEP 4: PROCESS WITH AI
-    // We send input + history to Ollama
-    const decision = await queryOllama(text, chronologicalHistory);
-    console.log("Processed AI Decision:", JSON.stringify(decision, null, 2));
+    // --- SEMANTIC CACHE INTEGRATION ---
+    // STEP 3.1: Generate Vector for User Input
+    const queryVector = await getTextVector(text);
 
+    // STEP 3.2: Check Semantic Cache
+    const cachedItems = await SemanticCache.findAll();
+    let bestMatch = null;
+    let highestSimilarity = -1;
+
+    for (const item of cachedItems) {
+        const itemVector = JSON.parse(item.vector);
+        const similarity = cosineSimilarity(queryVector, itemVector);
+        if (similarity > highestSimilarity) {
+            highestSimilarity = similarity;
+            bestMatch = item;
+        }
+    }
+
+    let decision;
     let finalResponse = "";
+
+    // Similarity Threshold (0.92 = 92% match)
+    if (bestMatch && highestSimilarity > 0.92) {
+        console.log(`\n\x1b[32m=== SEMANTIC CACHE HIT (${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
+        console.log(`Matched Query: "${bestMatch.text}"`);
+        decision = JSON.parse(bestMatch.action);
+        console.log("Using Cached AI Decision:", JSON.stringify(decision));
+    } else {
+        console.log(`\n\x1b[33m=== SEMANTIC CACHE MISS (Best match: ${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
+
+        // STEP 4: PROCESS WITH AI (Only if Cache Miss)
+        decision = await queryOllama(text, chronologicalHistory);
+        console.log("Processed AI Decision:", JSON.stringify(decision, null, 2));
+
+        // Save successful commands to Cache for next time
+        if (decision.type === 'system_action' || decision.type === 'web_search' || decision.type === 'file_action') {
+            try {
+                await SemanticCache.create({
+                    text: text,
+                    vector: JSON.stringify(queryVector),
+                    action: JSON.stringify(decision)
+                });
+                console.log("\x1b[36m[Saved command to Semantic Cache]\x1b[0m");
+            } catch (e) {
+                // Ignore unique constraint errors if exact string is somehow already there
+            }
+        }
+    }
+
 
     // STEP 5: EXECUTE SYSTEM ACTIONS (IF ANY)
     // If the AI decides this is a command (e.g., "Open Notepad"), execute it.
