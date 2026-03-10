@@ -134,5 +134,57 @@ async function queryOllama(userText) {
 
 }
 
+/**
+ * Generates a short title summarizing recent chat messages. Accept an AbortSignal for preemption.
+ * @param {string} chatHistoryText - The text of the last few messages to summarize.
+ * @param {AbortSignal} signal - Used to instantly map an abort to the internal fetch call.
+ */
+async function generateTitle(chatHistoryText, signal) {
+    const systemPrompt = `
+        You are DIVA. Write a very short 3-5 word title summarizing this conversation.
+        Return ONLY JSON like this: { "title": "Your Title Here" }
+        Do not add markdown, greetings, or any other text.
+        Conversation:
+        ${chatHistoryText}
+    `;
+
+    try {
+        const response = await fetch("http://127.0.0.1:11434/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: MODEL_NAME,
+                prompt: systemPrompt,
+                stream: false,
+                format: "json",
+                options: { num_predict: 50, temperature: 0.3 }
+            }),
+            signal: signal // Binds the fetch to the given AbortController
+        });
+
+        const data = await response.json();
+        let parsed;
+        try {
+            parsed = JSON.parse(data.response);
+        } catch (e) {
+            const match = data.response.match(/\{[\s\S]*\}/);
+            parsed = match ? JSON.parse(match[0]) : { title: data.response };
+        }
+
+        // Clean Title
+        let title = parsed.title || parsed.response || "Untitled Chat";
+        title = title.replace(/["']/g, "").trim();
+        if (title.length > 50) title = title.slice(0, 50);
+        return title;
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            console.log("[OllamaService] Title generation aborted to serve user request.");
+            throw err;
+        }
+        console.error("[OllamaService] Title Generation Error:", err.message);
+        return null;
+    }
+}
+
 // Export the function so it can be used in server.js
-module.exports = { queryOllama };
+module.exports = { queryOllama, generateTitle };

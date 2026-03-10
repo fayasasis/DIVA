@@ -21,7 +21,7 @@ const SemanticCache = require('./models/SemanticCache'); // Import Semantic Cach
 
 // --- LINKING SIBLING MODULES ---
 // We import functions from other folders (AI, Automation) to unify logic here.
-const { queryOllama } = require(path.join(__dirname, '../ai/ollamaService')); // AI Wrapper
+const { queryOllama, generateTitle } = require(path.join(__dirname, '../ai/ollamaService')); // AI Wrapper
 const { executeAction } = require(path.join(__dirname, '../automation/index')); // Automation Dispatcher
 const { startListening } = require(path.join(__dirname, '../ai/voiceService')); // Voice Input
 const { getTextVector, cosineSimilarity } = require('./utils/embedding'); // Semantic Cache Math
@@ -34,6 +34,10 @@ const server = http.createServer(app);
 
 // Define the Port number (5000 is standard for Flask/Node backends)
 const PORT = 5000;
+
+// --- IDLE WORKER STATE ---
+let titleAbortController = null;
+let lastActivityTime = Date.now();
 
 // MIDDLEWARE SETUP
 app.use(cors());          // Allow requests from React Frontend (different port)
@@ -56,6 +60,7 @@ Chat.belongsTo(Session, { foreignKey: 'sessionId' });
 // This connects to SQLite and creates tables if they don't exist.
 sequelize.sync().then(() => {
     console.log("SQLite Database Synced & Ready (Schema Updated).");
+    runIdleTitleGenerator(); // Start the background worker after DB is ready
 });
 
 // --- HELPER FUNCTION: SAVE MESSAGE ---
@@ -169,6 +174,15 @@ app.post('/api/execute-prediction', async (req, res) => {
 // --- MAIN CHAT COMPLETION ENDPOINT ---
 // Handles user text input -> AI Processing -> Action Execution -> Response
 app.post('/chat', async (req, res) => {
+    lastActivityTime = Date.now();
+
+    // Preempt any background title generation to reserve AI power for the user
+    if (titleAbortController) {
+        console.log("\n\x1b[31m[PREEMPT] Aborting background title generation for user priority!\x1b[0m");
+        titleAbortController.abort();
+        titleAbortController = null; // Clear gracefully
+    }
+
     const { text, sessionId: reqSessionId } = req.body;
     let sessionId = reqSessionId;
     let isNewSession = false;
@@ -177,24 +191,17 @@ app.post('/chat', async (req, res) => {
     console.log(`\nReceived: "${text}" [Session: ${sessionId || 'NEW'}]`);
 
     // STEP 1: HANDLE NEW SESSIONS
-    // If no sessionId provided, create a new one.
+    // If no sessionId provided, create a new one instantly to avoid blocking.
     if (!sessionId) {
         isNewSession = true;
-        try {
-            // Ask AI to generate a short title based on the first message
-            const titleDecision = await queryOllama(`User query: "${text}". Create a short 3-5 word title for this chat session. Return ONLY JSON like this: { "type": "conversation", "response": "Your Title Here" }`);
 
-            // Clean up the response
-            newTitle = titleDecision.response.replace(/["']/g, "").trim();
+        // Fast fallback title: first 5 words of user input
+        const words = text.split(" ").slice(0, 5).join(" ");
+        newTitle = words + (text.split(" ").length > 5 ? "..." : "");
 
-            if (newTitle.length > 50) newTitle = newTitle.slice(0, 50); // Safety limit
-        } catch (e) {
-            // Fallback if AI Title Generation fails
-            newTitle = text.slice(0, 30) + "...";
-        }
-
-        // Save new session to DB
-        const session = await Session.create({ title: newTitle });
+        // Save new session to DB instantly
+        // Flag it as not yet AI summarized
+        const session = await Session.create({ title: newTitle, isTitleGenerated: false });
         sessionId = session.id;
     }
 
@@ -339,6 +346,61 @@ io.on('connection', (socket) => {
         stopListening();
     });
 });
+
+// ==============================
+// BACKGROUND IDLE WORKER
+// ==============================
+async function runIdleTitleGenerator() {
+    try {
+        // Only run if 5 seconds have passed since last /chat activity
+        if (Date.now() - lastActivityTime > 5000) {
+            // Find a session that needs a title
+            const sessionToTitle = await Session.findOne({
+                where: { isTitleGenerated: false },
+                order: [['createdAt', 'ASC']]
+            });
+
+            if (sessionToTitle) {
+                console.log(`\n\x1b[36m[IDLE WORKER] Summarizing Session ${sessionToTitle.id} in background...\x1b[0m`);
+
+                // Get the first 3 chats of this session to summarize
+                const chats = await Chat.findAll({
+                    where: { sessionId: sessionToTitle.id },
+                    order: [['createdAt', 'ASC']],
+                    limit: 3
+                });
+
+                if (chats.length > 0) {
+                    const chatText = chats.map(c => `${c.role}: ${c.message}`).join("\n");
+
+                    titleAbortController = new AbortController();
+                    const newTitle = await generateTitle(chatText, titleAbortController.signal);
+                    titleAbortController = null; // Clear it after success
+
+                    if (newTitle) {
+                        await Session.update(
+                            { title: newTitle, isTitleGenerated: true },
+                            { where: { id: sessionToTitle.id } }
+                        );
+                        console.log(`\x1b[32m[IDLE WORKER] Success: Session ${sessionToTitle.id} retitled to "${newTitle}"\x1b[0m\n`);
+                        // Emit an event so frontend dynamically updates
+                        io.emit('session_updated');
+                    }
+                } else {
+                    // No chats yet, mark as generated to skip future checks
+                    await Session.update({ isTitleGenerated: true }, { where: { id: sessionToTitle.id } });
+                }
+            }
+        }
+    } catch (err) {
+        if (err.name !== 'AbortError') {
+            console.error("\x1b[31m[IDLE WORKER] Error:\x1b[0m", err.message);
+        }
+    }
+
+    // Check again in 3 seconds
+    setTimeout(runIdleTitleGenerator, 3000);
+}
 
 // START THE SERVER
 server.listen(PORT, () => {

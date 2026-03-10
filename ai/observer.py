@@ -4,7 +4,7 @@ import os           # Used for file path resolution
 import psutil       # (Unused import, but typically used for process management)
 import json         # Used to format output as JSON
 import ctypes       # Used to call Windows API (User32.dll)
-from brain_hmm import BrainHMM # Import our custom AI prediction class
+from brain_vomm import BrainVOMM # Import our new Variable-Order Markov Model
 
 # CONFIGURATION
 # Resolve absolute path to the SQLite database
@@ -13,8 +13,8 @@ DEBOUNCE_SECONDS = 1.5 # Only log if window stays open/focused for 1.5s
 # List of window titles to ignore (system hidden windows)
 IGNORE_LIST = ["Task Switching", "Program Manager", "Windows Input Experience", ""]
 
-# Initialize the Brain (Hidden Markov Model)
-brain = BrainHMM()
+# Initialize the Brain (Variable-Order Markov Model)
+brain = BrainVOMM(max_order=5)
 
 def init_db():
     """Initialize the SQLite database table if it doesn't exist."""
@@ -113,8 +113,8 @@ def log_and_predict(app_name):
         print(f"[LOG] {app_name}")
         
         # PREDICTION STEP
-        # Ask the brain what usually comes after this app
-        prediction = brain.predict(app_name)
+        # Ask the advanced VOMM brain what context matches we have
+        prediction = brain.predict()
         if prediction:
             # Emit JSON for Electron to read via stdout
             print(f"JSON_PREDICTION: {json.dumps(prediction)}", flush=True)
@@ -154,8 +154,8 @@ def main():
                    # It's a real focused app event
                    
                    # 1. Learn (Update Transition Matrix)
-                   # "User went from Last -> Current"
-                   if last_window: brain.learn(last_window, current)
+                   # VOMM learns the current state inherently mapping it to the history buffer
+                   brain.learn(current)
                    
                    # 2. Log to DB & Predict Next Move
                    log_and_predict(current)

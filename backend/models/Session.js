@@ -27,6 +27,13 @@ const Session = sequelize.define('Session', {
         type: DataTypes.STRING,  // Short text string
         allowNull: false,        // Cannot be empty
         defaultValue: 'New Chat' // Default value if nothing is provided
+    },
+
+    // Column: isTitleGenerated
+    // Flags if the AI has generated a proper conversational summary title for this session yet.
+    isTitleGenerated: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
     }
 }, {
     timestamps: true // Automatically adds 'createdAt' and 'updatedAt' columns
