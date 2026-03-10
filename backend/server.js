@@ -39,6 +39,33 @@ const PORT = 5000;
 let titleAbortController = null;
 let lastActivityTime = Date.now();
 
+// --- IN-MEMORY CONVERSATION BUFFER ---
+// Stores the active 6-message rolling context per session for fast Ollama /api/chat processing
+const activeChatHistory = {}; // Format: { "sessionId1": [ {role: "user", content: "..."}, {role: "assistant", ...} ] }
+
+/**
+ * Pushes a new message to the RAM buffer and enforces the 6-message limit.
+ * @param {number|string} sessionId - The ID of the conversation
+ * @param {string} role - 'user' or 'bot' (bot is auto-mapped to 'assistant' for Ollama)
+ * @param {string|object} content - The text or JSON to store
+ */
+function updateChatHistory(sessionId, role, content) {
+    if (!activeChatHistory[sessionId]) {
+        activeChatHistory[sessionId] = [];
+    }
+
+    // Normalize DB roles to Ollama API roles
+    const apiRole = role === 'bot' ? 'assistant' : 'user';
+    const textContent = typeof content === 'string' ? content : JSON.stringify(content);
+
+    activeChatHistory[sessionId].push({ role: apiRole, content: textContent });
+
+    // Enforce rolling window (last 6 messages / 3 conversational turns)
+    if (activeChatHistory[sessionId].length > 6) {
+        activeChatHistory[sessionId] = activeChatHistory[sessionId].slice(-6);
+    }
+}
+
 // MIDDLEWARE SETUP
 app.use(cors());          // Allow requests from React Frontend (different port)
 app.use(express.json());  // Enable parsing of JSON bodies in POST requests
@@ -206,17 +233,12 @@ app.post('/chat', async (req, res) => {
     }
 
     // STEP 2: LOAD CONTEXT (HISTORY)
-    // Fetch last 10 messages to give AI memory context.
-    // We reverse them so they are in chronological order for the LLM.
-    const history = await Chat.findAll({
-        where: { sessionId },
-        order: [['createdAt', 'DESC']],
-        limit: 10
-    });
-    const chronologicalHistory = history.reverse();
+    // We now use the blazing-fast in-memory RAM array for Ollama Chat API!
+    const ramHistory = activeChatHistory[sessionId] || [];
 
     // STEP 3: SAVE USER MESSAGE
-    await saveMessage(sessionId, 'user', text);
+    await saveMessage(sessionId, 'user', text);               // Save to DB permanently
+    updateChatHistory(sessionId, 'user', text);               // Save to active RAM for Ollama
 
     // --- SEMANTIC CACHE INTEGRATION ---
     // STEP 3.1: Generate Vector for User Input
@@ -241,15 +263,26 @@ app.post('/chat', async (req, res) => {
 
     // Similarity Threshold (0.92 = 92% match)
     if (bestMatch && highestSimilarity > 0.92) {
-        console.log(`\n\x1b[32m=== SEMANTIC CACHE HIT (${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
-        console.log(`Matched Query: "${bestMatch.text}"`);
-        decision = JSON.parse(bestMatch.action);
-        console.log("Using Cached AI Decision:", JSON.stringify(decision));
-    } else {
+        let cachedDecision = JSON.parse(bestMatch.action);
+
+        // ONLY use cache for system/web/file actions, bypass it for conversational topics
+        if (cachedDecision.type !== 'conversation') {
+            console.log(`\n\x1b[32m=== SEMANTIC CACHE HIT (${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
+            console.log(`Matched Query: "${bestMatch.text}"`);
+            decision = cachedDecision;
+            console.log("Using Cached AI Decision:", JSON.stringify(decision));
+        } else {
+            console.log(`\n\x1b[33m=== SEMANTIC CACHE IGNORED (Conversational match prevented at ${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
+            bestMatch = null;
+        }
+    }
+
+    if (!bestMatch || highestSimilarity <= 0.92) {
         console.log(`\n\x1b[33m=== SEMANTIC CACHE MISS (Best match: ${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
 
         // STEP 4: PROCESS WITH AI (Only if Cache Miss)
-        decision = await queryOllama(text, chronologicalHistory);
+        // Pass the blazing-fast RAM history into the new /api/chat endpoint
+        decision = await queryOllama(text, ramHistory);
         console.log("Processed AI Decision:", JSON.stringify(decision, null, 2));
 
         // Save successful commands to Cache for next time
@@ -278,7 +311,8 @@ app.post('/chat', async (req, res) => {
     }
 
     // STEP 6: SAVE BOT RESPONSE
-    await saveMessage(sessionId, 'bot', finalResponse);
+    await saveMessage(sessionId, 'bot', finalResponse);               // Save to DB permanently 
+    updateChatHistory(sessionId, 'assistant', finalResponse); // Save AI context to Active RAM (Raw Text only)
 
     // STEP 7: UPDATE TIMESTAMP
     // Mark the session as updated so it moves to the top of the sidebar.
@@ -322,8 +356,11 @@ io.on('connection', (socket) => {
 
             if (sessionId) await saveMessage(sessionId, 'user', recognizedText);
 
-            // Process with AI
-            const decision = await queryOllama(recognizedText);
+            // Process with AI using Voice RAM history
+            const ramHistory = activeChatHistory[sessionId] || [];
+            updateChatHistory(sessionId, 'user', recognizedText);
+
+            const decision = await queryOllama(recognizedText, ramHistory);
             let botResponse = "";
 
             // Execute Actions
@@ -333,7 +370,10 @@ io.on('connection', (socket) => {
                 botResponse = decision.response || "I am listening.";
             }
 
-            if (sessionId) await saveMessage(sessionId, 'bot', botResponse);
+            if (sessionId) {
+                await saveMessage(sessionId, 'bot', botResponse);
+                updateChatHistory(sessionId, 'assistant', botResponse);
+            }
 
             // Speak/Show Response
             socket.emit('bot_response', botResponse);

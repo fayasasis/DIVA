@@ -119,6 +119,8 @@ async function executeAction(decision, rawQuery = "") {
         decision.type === 'web_search' ||
         rawIntent.includes('web') ||
         rawIntent.includes('search') ||
+        rawIntent.includes('find') ||
+        rawIntent.includes('inform') ||
         rawIntent.includes('youtube') ||
         rawIntent.includes('media') ||
         rawIntent.includes('play') ||
