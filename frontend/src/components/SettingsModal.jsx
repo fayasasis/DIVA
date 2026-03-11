@@ -1,6 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
+    const [availableVoices, setAvailableVoices] = useState([]);
+
+    const [activeTab, setActiveTab] = useState('profile');
+
+    useEffect(() => {
+        const loadVoices = () => setAvailableVoices(window.speechSynthesis.getVoices());
+        loadVoices();
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+    }, []);
+
     if (!isOpen) return null;
 
     const handleChange = (key, value) => {
@@ -15,28 +25,26 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
         { id: 'dev', icon: 'terminal', label: 'Developer' }
     ];
 
-    const [activeTab, setActiveTab] = useState('profile');
-
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300" onClick={onClose}>
-            <div className="w-[800px] h-[600px] glass-panel rounded-2xl flex overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 slide-in-from-right-10" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300" onClick={onClose}>
+            <div className="w-full max-w-[800px] h-full max-h-[600px] glass-panel rounded-2xl flex flex-col md:flex-row overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 slide-in-from-right-10" onClick={e => e.stopPropagation()}>
 
-                {/* SIDEBAR TABS */}
-                <div className="w-64 bg-black/20 border-r border-white/10 p-4 flex flex-col gap-2">
-                    <h2 className="text-xl font-bold text-white mb-6 pl-4 tracking-tight">Settings</h2>
+                {/* SIDEBAR TABS (Horizontal on Mobile, Vertical on Desktop) */}
+                <div className="w-full md:w-64 bg-black/20 border-b md:border-b-0 md:border-r border-white/10 p-4 flex flex-row md:flex-col gap-2 overflow-x-auto custom-scrollbar shrink-0">
+                    <h2 className="text-xl font-bold text-white md:mb-6 pl-2 md:pl-4 tracking-tight hidden md:block">Settings</h2>
 
                     {sections.map(section => (
                         <button
                             key={section.id}
                             onClick={() => setActiveTab(section.id)}
-                            className={`flex items-center gap-3 p-3 rounded-xl transition-all text-sm font-medium ${activeTab === section.id ? 'bg-[var(--neon-cyan)]/20 text-[var(--neon-cyan)] border border-[var(--neon-cyan)]/30' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
+                            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-xl transition-all text-xs md:text-sm font-medium whitespace-nowrap ${activeTab === section.id ? 'bg-[var(--neon-cyan)]/20 text-[var(--neon-cyan)] border border-[var(--neon-cyan)]/30' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
                         >
-                            <span className="material-symbols-outlined">{section.icon}</span>
+                            <span className="material-symbols-outlined text-[18px] md:text-[24px]">{section.icon}</span>
                             {section.label}
                         </button>
                     ))}
 
-                    <div className="mt-auto p-4 border-t border-white/10">
+                    <div className="mt-auto hidden md:block p-4 border-t border-white/10">
                         <p className="text-[10px] text-slate-500 text-center">DIVA Config v1.0</p>
                     </div>
                 </div>
@@ -56,23 +64,27 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
                             </div>
 
                             <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">User Name</label>
-                                    <input
-                                        type="text"
-                                        value={settings.userName}
-                                        onChange={e => handleChange('userName', e.target.value)}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-white focus:border-[var(--neon-cyan)] outline-none transition-colors"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Location</label>
-                                    <input
-                                        type="text"
-                                        value={settings.location}
-                                        onChange={e => handleChange('location', e.target.value)}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-white focus:border-[var(--neon-cyan)] outline-none transition-colors"
-                                    />
+                                <div className="flex flex-col md:flex-row gap-4">
+                                    <div className="flex-1">
+                                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">First Name</label>
+                                        <input
+                                            type="text"
+                                            value={settings.firstName}
+                                            onChange={e => handleChange('firstName', e.target.value)}
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-white focus:border-[var(--neon-cyan)] outline-none transition-colors"
+                                            placeholder="John"
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Last Name</label>
+                                        <input
+                                            type="text"
+                                            value={settings.lastName}
+                                            onChange={e => handleChange('lastName', e.target.value)}
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-white focus:border-[var(--neon-cyan)] outline-none transition-colors"
+                                            placeholder="Doe"
+                                        />
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Preferred Browser</label>
@@ -104,7 +116,7 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
                                         <h4 className="text-sm font-bold text-white">Window Mode</h4>
                                         <p className="text-[10px] text-slate-500">Shrink to widget or full chat.</p>
                                     </div>
-                                    <div className="flex bg-black/30 rounded-lg p-1">
+                                    <div className="flex bg-black/30 rounded-lg p-1 mt-2 sm:mt-0">
                                         <button
                                             onClick={() => handleChange('windowMode', 'normal')}
                                             className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${settings.windowMode === 'normal' ? 'bg-[var(--neon-cyan)] text-black shadow-lg' : 'text-slate-500'}`}
@@ -167,29 +179,50 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
 
                             <div className="space-y-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Microphone Input</label>
+                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Speech Engine Voice</label>
                                     <select
+                                        value={settings.voiceName || ''}
+                                        onChange={e => handleChange('voiceName', e.target.value)}
                                         className="w-full bg-[#1a1a1a] border border-white/10 rounded-lg p-3 text-white focus:border-[var(--neon-cyan)] outline-none transition-colors"
                                     >
-                                        <option>Default System Microphone</option>
-                                        <option>Headset Microphone (Realtek Audio)</option>
+                                        <option value="">System Default Voice</option>
+                                        {availableVoices.map((v, i) => (
+                                            <option key={i} value={v.name}>{v.name} ({v.lang})</option>
+                                        ))}
                                     </select>
                                 </div>
 
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Speaking Rate</label>
-                                        <span className="text-xs text-[var(--neon-cyan)]">{settings.speakingRate}x</span>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Speaking Rate</label>
+                                            <span className="text-xs text-[var(--neon-cyan)]">{settings.speakingRate}x</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.5"
+                                            max="2.0"
+                                            step="0.1"
+                                            value={settings.speakingRate}
+                                            onChange={e => handleChange('speakingRate', parseFloat(e.target.value))}
+                                            className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--neon-cyan)]"
+                                        />
                                     </div>
-                                    <input
-                                        type="range"
-                                        min="0.5"
-                                        max="2.0"
-                                        step="0.1"
-                                        value={settings.speakingRate}
-                                        onChange={e => handleChange('speakingRate', parseFloat(e.target.value))}
-                                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--neon-cyan)]"
-                                    />
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Voice Pitch</label>
+                                            <span className="text-xs text-[var(--neon-cyan)]">{settings.voicePitch || 1.0}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="2.0"
+                                            step="0.1"
+                                            value={settings.voicePitch || 1.0}
+                                            onChange={e => handleChange('voicePitch', parseFloat(e.target.value))}
+                                            className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--neon-cyan)]"
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -223,7 +256,7 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
                                 ))}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <button className="p-4 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02]">
                                     <span className="material-symbols-outlined text-2xl">delete_forever</span>
                                     <span className="text-sm font-bold">Clear History</span>

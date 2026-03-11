@@ -210,7 +210,7 @@ app.post('/chat', async (req, res) => {
         titleAbortController = null; // Clear gracefully
     }
 
-    const { text, sessionId: reqSessionId } = req.body;
+    const { text, sessionId: reqSessionId, safeMode, bypassSafeMode } = req.body;
     let sessionId = reqSessionId;
     let isNewSession = false;
     let newTitle = "";
@@ -241,28 +241,41 @@ app.post('/chat', async (req, res) => {
     updateChatHistory(sessionId, 'user', text);               // Save to active RAM for Ollama
 
     // --- SEMANTIC CACHE INTEGRATION ---
-    // STEP 3.1: Generate Vector for User Input
-    const queryVector = await getTextVector(text);
-
-    // STEP 3.2: Check Semantic Cache
     const cachedItems = await SemanticCache.findAll();
+
+    // STEP 3.1: Check EXACT MATCH first for zero-latency cache hit
+    let exactMatch = cachedItems.find(item => item.text.toLowerCase().trim() === text.toLowerCase().trim());
+
     let bestMatch = null;
     let highestSimilarity = -1;
+    let queryVector = null;
 
-    for (const item of cachedItems) {
-        const itemVector = JSON.parse(item.vector);
-        const similarity = cosineSimilarity(queryVector, itemVector);
-        if (similarity > highestSimilarity) {
-            highestSimilarity = similarity;
-            bestMatch = item;
+    if (exactMatch) {
+        bestMatch = exactMatch;
+        highestSimilarity = 1.0; 
+        console.log(`\n\x1b[32m=== EXACT CACHE HIT (Bypassing Vector Math) ===\x1b[0m`);
+    } else {
+        // STEP 3.2: Generate Vector for User Input if no exact match
+        queryVector = await getTextVector(text);
+
+        // STEP 3.3: Calculate Semantic Similarity
+        for (const item of cachedItems) {
+            const itemVector = JSON.parse(item.vector);
+            const similarity = cosineSimilarity(queryVector, itemVector);
+            if (similarity > highestSimilarity) {
+                highestSimilarity = similarity;
+                bestMatch = item;
+            }
         }
     }
 
     let decision;
     let finalResponse = "";
 
-    // Similarity Threshold (0.92 = 92% match)
-    if (bestMatch && highestSimilarity > 0.92) {
+    // Similarity Threshold (0.98 = 98% match)
+    // We increased this from 0.92 to 0.98 to prevent false positive cache hits on conversational queries
+    // that happen to share embeddings with cached system actions (like "Blue is my favourite color" vs "Set light to blue").
+    if (bestMatch && highestSimilarity >= 0.98) {
         let cachedDecision = JSON.parse(bestMatch.action);
 
         // ONLY use cache for system/web/file actions, bypass it for conversational topics
@@ -277,7 +290,7 @@ app.post('/chat', async (req, res) => {
         }
     }
 
-    if (!bestMatch || highestSimilarity <= 0.92) {
+    if (!bestMatch || highestSimilarity < 0.98) {
         console.log(`\n\x1b[33m=== SEMANTIC CACHE MISS (Best match: ${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
 
         // STEP 4: PROCESS WITH AI (Only if Cache Miss)
@@ -288,12 +301,14 @@ app.post('/chat', async (req, res) => {
         // Save successful commands to Cache for next time
         if (decision.type === 'system_action' || decision.type === 'web_search' || decision.type === 'file_action') {
             try {
-                await SemanticCache.create({
-                    text: text,
-                    vector: JSON.stringify(queryVector),
-                    action: JSON.stringify(decision)
-                });
-                console.log("\x1b[36m[Saved command to Semantic Cache]\x1b[0m");
+                if (queryVector) { // Only save if a vector was actually generated
+                    await SemanticCache.create({
+                        text: text,
+                        vector: JSON.stringify(queryVector),
+                        action: JSON.stringify(decision)
+                    });
+                    console.log("\x1b[36m[Saved command to Semantic Cache]\x1b[0m");
+                }
             } catch (e) {
                 // Ignore unique constraint errors if exact string is somehow already there
             }
@@ -304,6 +319,23 @@ app.post('/chat', async (req, res) => {
     // STEP 5: EXECUTE SYSTEM ACTIONS (IF ANY)
     // If the AI decides this is a command (e.g., "Open Notepad"), execute it.
     if (decision.type === 'system_action' || decision.type === 'web_search' || decision.type === 'file_action' || decision.intent) {
+        
+        // --- SAFE MODE INTERCEPTION ---
+        const isSensitive = () => {
+             const intent = (decision.intent || decision.type || "").toLowerCase();
+             const action = (decision.entities?.action || decision.entities?.command || "").toLowerCase();
+             const t = text.toLowerCase();
+             const dangerousKeywords = ['shutdown', 'restart computer', 'reboot', 'turn off computer'];
+             if (dangerousKeywords.some(kw => t.includes(kw))) return true;
+             if (intent.includes('delete') || action.includes('delete') || t.includes('delete')) return true;
+             return false;
+        };
+
+        if (safeMode && !bypassSafeMode && isSensitive()) {
+             console.log("\x1b[33m[SAFE MODE] Intercepted sensitive command. Awaiting UI confirmation.\x1b[0m");
+             return res.json({ requiresConfirmation: true });
+        }
+
         finalResponse = await executeAction(decision, text);
     } else {
         // Otherwise, just reply with text
@@ -336,7 +368,8 @@ io.on('connection', (socket) => {
     console.log(`Client Connected: ${socket.id}`);
 
     // CLIENT LISTENS FOR VOICE START
-    socket.on('start_listening', () => {
+    socket.on('start_listening', (config) => {
+        const safeMode = config?.safeMode ?? true;
         console.log("Received Start Command");
 
         // Start the Python 'ears' service
@@ -365,7 +398,19 @@ io.on('connection', (socket) => {
 
             // Execute Actions
             if (decision.type === 'system_action' || decision.type === 'web_search') {
-                botResponse = await executeAction(decision, recognizedText);
+                
+                // Voice Safe Mode Check
+                const t = recognizedText.toLowerCase();
+                const intent = (decision.intent || decision.type || "").toLowerCase();
+                const action = (decision.entities?.action || decision.entities?.command || "").toLowerCase();
+                const isSensitive = ['shutdown', 'restart computer', 'reboot', 'turn off computer'].some(kw => t.includes(kw)) || intent.includes('delete') || action.includes('delete') || t.includes('delete');
+                
+                if (safeMode && isSensitive) {
+                    botResponse = "Safe mode prevented a sensitive voice command. Please type it in the console to confirm.";
+                } else {
+                    botResponse = await executeAction(decision, recognizedText);
+                }
+
             } else {
                 botResponse = decision.response || "I am listening.";
             }

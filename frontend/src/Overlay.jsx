@@ -57,6 +57,17 @@ const Overlay = () => {
         }
     };
 
+    useEffect(() => {
+        let timer;
+        if (prediction) {
+            // Auto hide the suggestion after 8 seconds to prevent annoyance
+            timer = setTimeout(() => {
+                handleReject();
+            }, 8000);
+        }
+        return () => clearTimeout(timer);
+    }, [prediction]);
+
     if (!prediction) return null;
 
     return (

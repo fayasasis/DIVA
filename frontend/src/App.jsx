@@ -31,11 +31,16 @@ function App() {
   // AI Intelligence
   const [prediction, setPrediction] = useState(null); // Smart Action Prediction Data from Electron
 
+  // Telemetry (Developer Console)
+  const [devLogs, setDevLogs] = useState([]);
+  const logsEndRef = useRef(null);
+
   // Settings Configuration (Persisted in LocalStorage)
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('diva_settings');
     return saved ? JSON.parse(saved) : {
-      userName: 'JD',             // User Name for UI
+      firstName: 'John',
+      lastName: 'Doe',
       location: 'Kochi, Kerala',  // Location (Context)
       browser: 'Chrome',          // Default Browser Preference
       windowMode: 'normal',
@@ -46,6 +51,8 @@ function App() {
       micInput: 'Default',
       wakeWordSensitivity: 5,
       speakingRate: 1.0,          // TTS Speed
+      voicePitch: 1.0,            // Voice Tone
+      voiceName: '',              // Selected SpeechSynthesis voice
       smartPredictions: true,     // Enable AI Suggestions
       safeMode: true,
       showLogs: false
@@ -55,7 +62,28 @@ function App() {
   // Effect: Save settings whenever they change
   useEffect(() => {
     localStorage.setItem('diva_settings', JSON.stringify(settings));
+
+    // Send IPC System Commands to Electron Main Process
+    if (window.require) {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('update-settings', {
+        alwaysOnTop: settings.alwaysOnTop,
+        transparency: settings.transparency,
+        minimizeToTray: settings.minimizeToTray,
+        smartPredictions: settings.smartPredictions,
+        showLogs: settings.showLogs,
+        windowMode: settings.windowMode
+      });
+    }
+
   }, [settings]);
+
+  // Derived State: Calculate Initials
+  const getInitials = () => {
+    const f = settings.firstName ? settings.firstName.charAt(0).toUpperCase() : '';
+    const l = settings.lastName ? settings.lastName.charAt(0).toUpperCase() : '';
+    return f + l || '?';
+  };
 
   // Session Editing State (Renaming Logic)
   const [editingSessionId, setEditingSessionId] = useState(null);
@@ -101,8 +129,19 @@ function App() {
 
       ipcRenderer.on('prediction', handlePrediction);
 
+      // Listen for Backend Logs (Telemetry)
+      const handleLogs = (event, log) => {
+        setDevLogs(prev => {
+          const newLogs = [...prev, log];
+          return newLogs.slice(-100); // Keep last 100 logs
+        });
+      };
+
+      ipcRenderer.on('backend-log', handleLogs);
+
       return () => {
         ipcRenderer.removeListener('prediction', handlePrediction);
+        ipcRenderer.removeListener('backend-log', handleLogs);
       };
     }
   }, []);
@@ -111,6 +150,13 @@ function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Effect: Auto-scroll Developer Console
+  useEffect(() => {
+    if (settings.showLogs) {
+      logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [devLogs, settings.showLogs]);
 
   // --- 3. API INTERACTIONS ---
 
@@ -199,6 +245,14 @@ function App() {
 
     const u = new SpeechSynthesisUtterance(text);
     u.rate = settings.speakingRate;
+    u.pitch = settings.voicePitch || 1.0;
+
+    // Apply specific voice if selected
+    if (settings.voiceName) {
+        const voices = window.speechSynthesis.getVoices();
+        const selectedVoice = voices.find(v => v.name === settings.voiceName);
+        if (selectedVoice) u.voice = selectedVoice;
+    }
 
     // ALGORITHM: Progress Bar Estimation
     // Since Web Speech API doesn't give duration, we estimate it based on word count.
@@ -262,11 +316,31 @@ function App() {
     setInputText(""); // Clear input
 
     try {
-      const payload = { text: originalText };
+      const payload = { 
+          text: originalText,
+          safeMode: settings.safeMode
+      };
       if (currentSession) payload.sessionId = currentSession;
 
       // API Call to Backend
-      const res = await axios.post('http://localhost:5000/chat', payload);
+      let res = await axios.post('http://localhost:5000/chat', payload);
+
+      // --- SAFE MODE CONFIRMATION ---
+      if (res.data.requiresConfirmation) {
+          // Pause execution and ask user (native OS dialog in Electron)
+          const proceed = window.confirm(`SAFE MODE WARNING\n\nA sensitive command was detected.\nAre you sure you want to execute:\n"${originalText}"?`);
+          
+          if (proceed) {
+              // User confirmed. Resend with bypass flag.
+              payload.bypassSafeMode = true;
+              res = await axios.post('http://localhost:5000/chat', payload);
+          } else {
+              // User aborted.
+              addMessage('bot', 'Action aborted by Safe Mode.');
+              if (settings.voiceResponse) speak('Action aborted by Safe Mode.');
+              return;
+          }
+      }
 
       const botText = res.data.response || "Done";
       addMessage('bot', botText);
@@ -288,15 +362,14 @@ function App() {
       socket.emit('stop_listening');
       setIsRecording(false);
     } else {
-      socket.emit('start_listening');
+      socket.emit('start_listening', { safeMode: settings.safeMode });
       setIsRecording(true);
     }
   };
 
   // --- 6. RENDER UI ---
   return (
-    <div className="h-screen overflow-hidden flex bg-[#121212]">
-
+    <div className={`flex h-screen ${settings.transparency ? 'bg-transparent' : 'bg-[#121212]'} overflow-hidden`}>
       {/* COMPONENT: Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
@@ -306,7 +379,7 @@ function App() {
       />
 
       {/* COMPONENT: Sidebar */}
-      <aside className={`glass-panel border-r border-white/10 flex flex-col h-full transition-all duration-300 z-20 absolute md:relative ${isSidebarCollapsed ? 'w-20' : 'w-72'} ${!showHistory ? '-translate-x-full md:translate-x-0' : 'translate-x-0'}`}>
+      <aside className={`bg-[#121212] border-r border-white/10 flex flex-col h-full transition-all duration-300 z-20 absolute md:relative ${isSidebarCollapsed ? 'w-20' : 'w-72'} ${!showHistory ? '-translate-x-full md:translate-x-0' : 'translate-x-0'}`}>
 
         {/* Sidebar Header */}
         <div className={`p-4 border-b border-white/10 flex items-center bg-black/20 ${isSidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
@@ -331,7 +404,7 @@ function App() {
           {sessions.map((session) => (
             <div
               key={session.id}
-              className={`group p-3 rounded-lg cursor-pointer border transition-all relative ${currentSession === session.id ? 'bg-white/10 border-[var(--neon-cyan)]/40' : 'bg-transparent border-transparent hover:bg-white/5'} ${isSidebarCollapsed ? 'flex justify-center' : ''}`}
+              className={`group p-3 rounded-lg cursor-pointer border transition-all relative ${currentSession === session.id ? 'glass-panel border-[var(--neon-cyan)]/30 shadow-[0_0_15px_rgba(0,255,204,0.1)]' : 'border-transparent hover:bg-white/5'} ${isSidebarCollapsed ? 'flex justify-center' : ''}`}
               onClick={() => loadSession(session.id)}
               title={session.title}
             >
@@ -351,7 +424,7 @@ function App() {
                   />
                 ) : (
                   <>
-                    <h3 className="text-sm font-medium text-slate-200 truncate pr-6">{session.title}</h3>
+                    <h3 className="text-sm font-medium text-slate-300 truncate pr-6">{session.title}</h3>
                     <p className="text-[10px] text-slate-500 mt-1 flex justify-between">
                       <span>{new Date(session.updatedAt).toLocaleDateString()}</span>
                       {!isSidebarCollapsed && <span>{new Date(session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
@@ -391,9 +464,11 @@ function App() {
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="w-8 h-8 rounded-full border-2 border-[#121212] bg-slate-800 flex items-center justify-center text-[10px] font-bold text-white">{settings.userName}</div>
+            <div className="w-8 h-8 rounded-full border-2 border-[#121212] bg-slate-800 flex items-center justify-center text-[10px] font-bold text-white">
+              {getInitials()}
+            </div>
             <button
-              className={`material-symbols-outlined text-slate-400 hover:text-[var(--neon-cyan)] transition-all duration-500 ${isSettingsOpen ? 'rotate-90 text-[var(--neon-cyan)]' : ''}`}
+              className={`material-symbols-outlined transition-all duration-500 ${isSettingsOpen ? 'rotate-90 text-[var(--neon-cyan)]' : 'text-slate-400 hover:text-[var(--neon-cyan)]'}`}
               onClick={() => setIsSettingsOpen(true)}
             >
               settings
@@ -402,7 +477,7 @@ function App() {
         </header>
 
         {/* Message Viewport */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pb-32">
+        <div className={`flex-1 overflow-y-auto custom-scrollbar p-8 ${settings.showLogs ? 'pb-64' : 'pb-32'}`}>
           <div className="max-w-4xl mx-auto space-y-8">
 
             {messages.map((msg, index) => (
@@ -413,7 +488,7 @@ function App() {
                   ? 'bg-gradient-to-br from-[var(--neon-cyan)] to-blue-600 text-white font-bold'
                   : 'glass-panel text-[var(--neon-cyan)] border-[var(--neon-cyan)]/30'
                   }`}>
-                  {msg.sender === 'user' ? 'JD' : <span className="material-symbols-outlined">auto_awesome</span>}
+                  {msg.sender === 'user' ? getInitials() : <span className="material-symbols-outlined">auto_awesome</span>}
                 </div>
 
                 {/* Message Bubble */}
@@ -530,7 +605,30 @@ function App() {
             </div>
 
           </div>
-          <p className="text-center text-[10px] text-slate-600 mt-4 uppercase tracking-[0.2em] font-bold">DIVA - Desktop Intelligent Virtual Assistant</p>
+          
+          {/* Integrated Telemetry Log View */}
+          {settings.showLogs ? (
+            <div className="max-w-4xl mx-auto mt-4 h-24 bg-black/60 border border-[var(--neon-cyan)]/20 rounded-lg p-2 overflow-y-auto custom-scrollbar font-mono text-[10px] animate-in slide-in-from-bottom-2">
+               {devLogs.length === 0 && <div className="text-slate-600 italic text-center mt-6">Awaiting telemetry streams...</div>}
+               {devLogs.map((log, i) => (
+                  <div key={i} className="whitespace-pre-wrap break-all leading-tight">
+                    <span className="text-slate-600 mr-2">{new Date(log.time).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                    <span className={`${log.type === 'python' ? 'text-blue-400' :
+                      log.type === 'python-error' ? 'text-red-400' :
+                        log.type === 'node' ? 'text-green-400' :
+                          'text-red-500' 
+                      }`}>
+                      [{log.type.toUpperCase()}]
+                    </span>
+                    <span className="text-slate-300 ml-2">{log.message}</span>
+                  </div>
+               ))}
+               <div ref={logsEndRef} />
+            </div>
+          ) : (
+            <p className="text-center text-[10px] text-slate-600 mt-4 uppercase tracking-[0.2em] font-bold">DIVA - Desktop Intelligent Virtual Assistant</p>
+          )}
+
         </div>
       </main>
     </div>

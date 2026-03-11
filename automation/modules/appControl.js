@@ -50,6 +50,13 @@ const executeAppAction = async (target, action) => {
         return "Opening File Explorer.";
     }
 
+    // Special Case: DIVA Assistant (Internal App)
+    if (searchTarget === 'diva assistant' || searchTarget === 'diva') {
+        // Just find and focus the actual DIVA window instead of failing due to it missing in StartApps
+        const appRes = await forceFocusWindow("DIVA Assistant");
+        return appRes || "DIVA Assistant is already active.";
+    }
+
     // 2. Build App Cache (If Empty)
     // Runs PowerShell to get a list of all installed Start Menu apps.
     if (!appCache) {

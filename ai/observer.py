@@ -4,7 +4,11 @@ import os           # Used for file path resolution
 import psutil       # (Unused import, but typically used for process management)
 import json         # Used to format output as JSON
 import ctypes       # Used to call Windows API (User32.dll)
+import subprocess   # Used to run PowerShell to get installed apps
 from brain_vomm import BrainVOMM # Import our new Variable-Order Markov Model
+
+# CACHE for installed applications to prevent checking every time
+INSTALLED_APPS_CACHE = set()
 
 # CONFIGURATION
 # Resolve absolute path to the SQLite database
@@ -17,6 +21,7 @@ IGNORE_LIST = ["Task Switching", "Program Manager", "Windows Input Experience", 
 brain = BrainVOMM(max_order=5)
 
 def init_db():
+    global INSTALLED_APPS_CACHE
     """Initialize the SQLite database table if it doesn't exist."""
     try:
         conn = sqlite3.connect(DB_PATH) # Connect to DB
@@ -37,6 +42,34 @@ def init_db():
         
         # Load History into Brain for training
         brain.load_data()
+        
+        # Build Installed Apps Cache once at startup
+        print("[INFO] Building Installed Apps Cache...")
+        try:
+            # Run powershell command
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "Get-StartApps | Select-Object -ExpandProperty Name"],
+                capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            # Add results to set 
+            if result.stdout:
+                apps = result.stdout.splitlines()
+                for app in apps:
+                    if app.strip():
+                        INSTALLED_APPS_CACHE.add(app.strip().lower())
+                
+                # Add some critical manual fallbacks
+                INSTALLED_APPS_CACHE.add("google chrome")
+                INSTALLED_APPS_CACHE.add("microsoft edge")
+                INSTALLED_APPS_CACHE.add("visual studio code")
+                INSTALLED_APPS_CACHE.add("diva assistant") # Fake app so it doesn't get filtered out
+                INSTALLED_APPS_CACHE.add("spotify")
+                INSTALLED_APPS_CACHE.add("calculator")
+                INSTALLED_APPS_CACHE.add("notepad")
+                INSTALLED_APPS_CACHE.add("file explorer")
+        except Exception as e:
+            print(f"[WARN] Failed to load app cache: {e}")
+            
     except Exception as e:
         print(f"[ERROR] DB Init: {e}")
 
@@ -116,6 +149,25 @@ def log_and_predict(app_name):
         # Ask the advanced VOMM brain what context matches we have
         prediction = brain.predict()
         if prediction:
+            next_action = prediction.get("next_action")
+            
+            # --- VALIDATION LAYER ---
+            # Verify the suggested "next_action" is actually a real, installed app
+            # (or the user's DIVA window itself) before sending the suggestion
+            if next_action and INSTALLED_APPS_CACHE:
+                 next_action_lower = str(next_action).lower().strip()
+                 
+                 # Attempt fuzzy check natively first to bypass latency of python libraries like fuzzywuzzy
+                 is_installed = False
+                 for cached_app in INSTALLED_APPS_CACHE:
+                     if next_action_lower in cached_app or cached_app in next_action_lower:
+                         is_installed = True
+                         break
+                         
+                 if not is_installed:
+                     print(f"[PREDICTION] Filtered out uninstalled app: '{next_action}'")
+                     return # Abort sending this prediction if it's garbage
+
             # Emit JSON for Electron to read via stdout
             print(f"JSON_PREDICTION: {json.dumps(prediction)}", flush=True)
             
