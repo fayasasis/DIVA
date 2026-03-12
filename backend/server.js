@@ -279,7 +279,8 @@ app.post('/chat', async (req, res) => {
         let cachedDecision = JSON.parse(bestMatch.action);
 
         // ONLY use cache for system/web/file actions, bypass it for conversational topics
-        if (cachedDecision.type !== 'conversation') {
+        // But if the user MANUALLY inserted a conversation into the DB, we respect the override.
+        if (cachedDecision.type !== 'conversation' || cachedDecision.manualOverride) {
             console.log(`\n\x1b[32m=== SEMANTIC CACHE HIT (${(highestSimilarity * 100).toFixed(1)}%) ===\x1b[0m`);
             console.log(`Matched Query: "${bestMatch.text}"`);
             decision = cachedDecision;
@@ -298,8 +299,10 @@ app.post('/chat', async (req, res) => {
         decision = await queryOllama(text, ramHistory);
         console.log("Processed AI Decision:", JSON.stringify(decision, null, 2));
 
-        // Save successful commands to Cache for next time
-        if (decision.type === 'system_action' || decision.type === 'web_search' || decision.type === 'file_action') {
+        // Save successful commands to Cache for next time.
+        // STRICTLY EXCLUDE conversations from polluting the semantic memory.
+        const isAction = decision.type === 'system_action' || decision.type === 'web_search' || decision.type === 'file_action' || decision.intent;
+        if (decision.type !== 'conversation' && isAction) {
             try {
                 if (queryVector) { // Only save if a vector was actually generated
                     await SemanticCache.create({

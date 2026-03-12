@@ -128,13 +128,20 @@ const executeAppAction = async (target, action) => {
         // --- FALLBACK: GENERIC EXECUTION ---
         // If not in Start Menu, maybe it's a direct file path or command?
 
-        // Check if it looks like a file path (C:\...)
+        // Check if it looks like a Web URL or Domain (e.g., spotify.com/nilapakshikal)
+        // We explicitly reject it so it falls back to 'webControl'
+        const isUrl = searchTarget.includes('.') && !searchTarget.includes(' ') && !searchTarget.includes('\\') && !searchTarget.includes(':\\') && !searchTarget.endsWith('.exe');
+        if (isUrl || searchTarget.startsWith('http')) {
+            return null; // Route to Web Control
+        }
+
+        // Check if it looks like a file path (C:\..., /path/to/script.sh)
         if (searchTarget.includes('\\') || searchTarget.includes('/') || searchTarget.includes(':')) {
-            try {
-                await runPowerShell(`Start-Process "${searchTarget}"`);
+            const success = await runPowerShell(`Start-Process "${searchTarget}"`);
+            if (success) {
                 return `Opening ${searchTarget}.`;
-            } catch (e) {
-                return `Could not find "${target}".`;
+            } else {
+                return null; // Route to Web Control if path execution fails
             }
         }
 
