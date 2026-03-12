@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 
 const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
     const [availableVoices, setAvailableVoices] = useState([]);
 
     const [activeTab, setActiveTab] = useState('profile');
+
+    const [confirmAction, setConfirmAction] = useState(null); // 'history' or 'model'
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [lastAction, setLastAction] = useState(null); // 'HISTORY_WIPE' or 'MODEL_RESET'
+    const [undoSuccess, setUndoSuccess] = useState(false);
 
     useEffect(() => {
         const loadVoices = () => setAvailableVoices(window.speechSynthesis.getVoices());
@@ -15,6 +21,54 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
 
     const handleChange = (key, value) => {
         setSettings(prev => ({ ...prev, [key]: value }));
+    };
+
+    const handleClearHistory = async () => {
+        setIsProcessing(true);
+        try {
+            await axios.delete('http://localhost:5000/api/settings/clear-history');
+            setConfirmAction(null);
+            setLastAction('HISTORY_WIPE');
+            // We don't reload immediately anymore to allow for Undo
+        } catch (err) {
+            const errorMsg = err.response?.data?.details || err.message;
+            alert("Failed to clear history: " + errorMsg);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleResetModel = async () => {
+        setIsProcessing(true);
+        try {
+            await axios.delete('http://localhost:5000/api/settings/reset-model');
+            setConfirmAction(null);
+            setLastAction('MODEL_RESET');
+        } catch (err) {
+            const errorMsg = err.response?.data?.details || err.message;
+            alert("Failed to reset model: " + errorMsg);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleUndo = async () => {
+        setIsProcessing(true);
+        try {
+            await axios.post('http://localhost:5000/api/settings/undo');
+            setLastAction(null);
+            setUndoSuccess(true);
+            setTimeout(() => setUndoSuccess(false), 3000);
+            if (lastAction === 'HISTORY_WIPE') {
+                // If history restore, we need to reload to show sessions again
+                window.location.reload();
+            }
+        } catch (err) {
+            const errorMsg = err.response?.data?.details || err.message;
+            alert("Undo failed: " + errorMsg);
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const sections = [
@@ -257,14 +311,107 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <button className="p-4 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02]">
-                                    <span className="material-symbols-outlined text-2xl">delete_forever</span>
-                                    <span className="text-sm font-bold">Clear History</span>
-                                </button>
-                                <button className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-[var(--neon-cyan)]/10 text-slate-300 hover:text-[var(--neon-cyan)] flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02]">
-                                    <span className="material-symbols-outlined text-2xl">restart_alt</span>
-                                    <span className="text-sm font-bold">Reset Model</span>
-                                </button>
+                                {confirmAction === 'history' ? (
+                                    <div className="col-span-full p-4 rounded-xl border border-red-500 bg-red-500/10 flex flex-col items-center gap-4 animate-in zoom-in-95 duration-200">
+                                        <div className="text-center text-red-400">
+                                            <p className="text-sm font-bold uppercase tracking-wider mb-1">Confirm Clear History?</p>
+                                            <p className="text-[10px]">This will permanently delete all your chats and cannot be undone.</p>
+                                        </div>
+                                        <div className="flex gap-4 w-full">
+                                            <button 
+                                                disabled={isProcessing}
+                                                onClick={() => setConfirmAction(null)}
+                                                className="flex-1 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button 
+                                                disabled={isProcessing}
+                                                onClick={handleClearHistory}
+                                                className="flex-1 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+                                            >
+                                                {isProcessing ? 'Clearing...' : 'Yes, Delete All'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : confirmAction === 'model' ? (
+                                    <div className="col-span-full p-4 rounded-xl border border-[var(--neon-cyan)] bg-[var(--neon-cyan)]/10 flex flex-col items-center gap-4 animate-in zoom-in-95 duration-200">
+                                        <div className="text-center text-[var(--neon-cyan)]">
+                                            <p className="text-sm font-bold uppercase tracking-wider mb-1">Confirm Model Reset?</p>
+                                            <p className="text-[10px]">This will wipe the semantic cache and activity logs. Predictions will start fresh.</p>
+                                        </div>
+                                        <div className="flex gap-4 w-full">
+                                            <button 
+                                                disabled={isProcessing}
+                                                onClick={() => setConfirmAction(null)}
+                                                className="flex-1 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button 
+                                                disabled={isProcessing}
+                                                onClick={handleResetModel}
+                                                className="flex-1 p-2 rounded-lg bg-[var(--neon-cyan)] hover:bg-cyan-400 text-black text-xs font-bold transition-all shadow-[0_0_15px_rgba(0,255,204,0.4)]"
+                                            >
+                                                {isProcessing ? 'Resetting...' : 'Yes, Reset Model'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {lastAction ? (
+                                            <div className="col-span-full p-6 rounded-xl border border-yellow-500/50 bg-yellow-500/10 flex flex-col items-center gap-3 animate-in slide-in-from-top-4">
+                                                <div className="flex items-center gap-2 text-yellow-400">
+                                                    <span className="material-symbols-outlined animation-spin">history</span>
+                                                    <span className="text-sm font-bold uppercase tracking-wider">
+                                                        {lastAction === 'HISTORY_WIPE' ? 'All History Cleared' : 'Model Reset Successful'}
+                                                    </span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 text-center">Data is temporarily stored in trash for 24 hours.</p>
+                                                <div className="flex gap-3 w-full max-w-[300px] mt-2">
+                                                    <button 
+                                                        onClick={() => {
+                                                            if (lastAction === 'HISTORY_WIPE') window.location.reload();
+                                                            setLastAction(null);
+                                                        }}
+                                                        className="flex-1 p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-xs transition-all"
+                                                    >
+                                                        Done
+                                                    </button>
+                                                    <button 
+                                                        disabled={isProcessing}
+                                                        onClick={handleUndo}
+                                                        className="flex-1 p-2 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-black text-xs font-bold transition-all shadow-lg"
+                                                    >
+                                                        {isProcessing ? 'Undoing...' : 'Undo Now'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : undoSuccess ? (
+                                            <div className="col-span-full p-6 rounded-xl border border-green-500/50 bg-green-500/10 flex flex-col items-center gap-2 animate-in zoom-in-95">
+                                                <span className="material-symbols-outlined text-3xl text-green-400">check_circle</span>
+                                                <span className="text-sm font-bold text-green-400 uppercase tracking-widest">Restored Successfully</span>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <button 
+                                                    onClick={() => { setConfirmAction('history'); setLastAction(null); }}
+                                                    className="p-4 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02]"
+                                                >
+                                                    <span className="material-symbols-outlined text-2xl">delete_forever</span>
+                                                    <span className="text-sm font-bold">Clear History</span>
+                                                </button>
+                                                <button 
+                                                    onClick={() => { setConfirmAction('model'); setLastAction(null); }}
+                                                    className="p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-[var(--neon-cyan)]/10 text-slate-300 hover:text-[var(--neon-cyan)] flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02]"
+                                                >
+                                                    <span className="material-symbols-outlined text-2xl">restart_alt</span>
+                                                    <span className="text-sm font-bold">Reset Model</span>
+                                                </button>
+                                            </>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         </div>
                     )}

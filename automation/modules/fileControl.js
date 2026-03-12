@@ -21,35 +21,42 @@ const resolvePath = (userPath) => {
 
     // Default: Return Desktop if input is empty
     if (!userPath) {
-        // Special check for OneDrive Desktop (common in Windows 10/11)
         const oneDriveDesktop = path.join(homedir, 'OneDrive', 'Desktop');
         if (fs.existsSync(oneDriveDesktop)) return oneDriveDesktop;
         return path.join(homedir, 'Desktop');
     }
 
-    const lower = userPath.toLowerCase().trim();
-
     // 1. Check if it's already an Absolute Path (e.g., "C:\Users\test")
     if (path.isAbsolute(userPath)) return userPath;
     if (/^[A-Za-z]:$/.test(userPath)) return userPath + "\\"; // Handle drive letters "E:"
 
-    // 2. Map Special Keyword Folders
-    if (lower.includes('desktop')) {
-        const oneDrive = path.join(homedir, 'OneDrive', 'Desktop');
-        return fs.existsSync(oneDrive) ? oneDrive : path.join(homedir, 'Desktop');
+    // 2. Map Special Keyword Folders with Sub-path support
+    const baseFolders = {
+        'desktop': fs.existsSync(path.join(homedir, 'OneDrive', 'Desktop')) 
+            ? path.join(homedir, 'OneDrive', 'Desktop') 
+            : path.join(homedir, 'Desktop'),
+        'download': path.join(homedir, 'Downloads'),
+        'document': path.join(homedir, 'Documents'),
+        'picture': path.join(homedir, 'Pictures'),
+        'video': path.join(homedir, 'Videos'),
+        'movie': path.join(homedir, 'Videos'),
+        'music': path.join(homedir, 'Music')
+    };
+
+    const lower = userPath.toLowerCase().trim();
+    
+    // Check if the input starts with a known folder keyword
+    for (const [keyword, baseDir] of Object.entries(baseFolders)) {
+        // Match "desktop", "desktop/file.txt", or "desktop\file.txt"
+        if (lower === keyword || lower.startsWith(keyword + '/') || lower.startsWith(keyword + '\\')) {
+            const subPath = userPath.slice(keyword.length).replace(/^[\\\/]+/, '');
+            return path.join(baseDir, subPath);
+        }
     }
-    if (lower.includes('download')) return path.join(homedir, 'Downloads');
-    if (lower.includes('document')) return path.join(homedir, 'Documents');
-    if (lower.includes('picture')) return path.join(homedir, 'Pictures');
-    if (lower.includes('video') || lower.includes('movie')) return path.join(homedir, 'Videos');
-    if (lower.includes('music')) return path.join(homedir, 'Music');
 
     // 3. Fallback: Treat as relative path on Desktop
     // e.g., "Divaproject" -> "C:\Users\Fayas\Desktop\Divaproject"
-    const baseDesktop = fs.existsSync(path.join(homedir, 'OneDrive', 'Desktop'))
-        ? path.join(homedir, 'OneDrive', 'Desktop')
-        : path.join(homedir, 'Desktop');
-
+    const baseDesktop = baseFolders['desktop'];
     return path.join(baseDesktop, userPath);
 };
 

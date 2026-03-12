@@ -18,6 +18,7 @@ const sequelize = require('./config/database'); // Import Database Config
 const Chat = require('./models/Chat');          // Import Chat Model
 const Session = require('./models/Session');    // Import Session Model
 const SemanticCache = require('./models/SemanticCache'); // Import Semantic Cache Model
+const Trash = require('./models/Trash');        // Import Trash Model
 
 // --- LINKING SIBLING MODULES ---
 // We import functions from other folders (AI, Automation) to unify logic here.
@@ -88,6 +89,7 @@ Chat.belongsTo(Session, { foreignKey: 'sessionId' });
 sequelize.sync().then(() => {
     console.log("SQLite Database Synced & Ready (Schema Updated).");
     runIdleTitleGenerator(); // Start the background worker after DB is ready
+    runTrashPurger();        // Start the trash cleanup worker
 });
 
 // --- HELPER FUNCTION: SAVE MESSAGE ---
@@ -153,10 +155,10 @@ app.delete('/sessions/:id', async (req, res) => {
     try {
         console.log(`DELETE Request for Session: ${req.params.id}`);
 
-        // Step 1: Delete all messages associated with this session
+        // Step 1: Delete all messages associated with this session (Child first)
         await Chat.destroy({ where: { sessionId: req.params.id } });
 
-        // Step 2: Delete the session entry itself
+        // Step 2: Delete the session entry itself (Parent second)
         const deleted = await Session.destroy({ where: { id: req.params.id } });
 
         if (deleted) {
@@ -169,6 +171,131 @@ app.delete('/sessions/:id', async (req, res) => {
     } catch (err) {
         console.error("DELETE FAILED:", err);
         res.status(500).json({ error: "Failed to delete", details: err.message });
+    }
+});
+
+// --- CLEAR ALL HISTORY (WITH UNDO) ---
+// Backs up sessions and chats to Trash before wiping.
+app.delete('/api/settings/clear-history', async (req, res) => {
+    try {
+        console.log("CRITICAL: Clear All History requested. Backing up to Trash...");
+        
+        // Step 1: Fetch all data for backup
+        const sessions = await Session.findAll({ include: [Chat] });
+        
+        if (sessions.length > 0) {
+            // Convert Sequelize instances to plain objects for safe serialization
+            const backupData = sessions.map(s => s.get({ plain: true }));
+            
+            await Trash.create({
+                type: 'HISTORY_WIPE',
+                data: JSON.stringify(backupData)
+            });
+            console.log(`Backed up ${sessions.length} sessions to Trash.`);
+        }
+        
+        // Step 2: Delete all Chats and Sessions in correct order
+        // We delete Chats first to avoid Foreign Key Constraint errors
+        await Chat.destroy({ where: {}, truncate: false });
+        await Session.destroy({ where: {}, truncate: false });
+        
+        // Step 3: Clear RAM buffer
+        Object.keys(activeChatHistory).forEach(key => delete activeChatHistory[key]);
+
+        console.log("Database & RAM history moved to Trash.");
+        res.json({ success: true, message: "Chat history moved to Trash. You have 24 hours to undo." });
+    } catch (err) {
+        console.error("CLEAR HISTORY FAILED:", err);
+        res.status(500).json({ error: "Failed to clear history", details: err.message, stack: err.stack });
+    }
+});
+
+// --- RESET AI MODEL & CACHE (WITH UNDO) ---
+// Backs up semantic cache and activity logs to Trash before wiping.
+app.delete('/api/settings/reset-model', async (req, res) => {
+    try {
+        console.log("CRITICAL: Reset AI Model requested. Backing up to Trash...");
+
+        // Step 1: Fetch all data for backup
+        const cache = await SemanticCache.findAll();
+        const logs = await sequelize.query("SELECT * FROM activity_logs", { type: sequelize.QueryTypes.SELECT });
+
+        if (cache.length > 0 || logs.length > 0) {
+            await Trash.create({
+                type: 'MODEL_RESET',
+                data: JSON.stringify({ 
+                    cache: cache.map(c => c.get({ plain: true })), 
+                    logs 
+                })
+            });
+        }
+
+        // Step 2: Wipe Semantic Cache
+        await SemanticCache.destroy({ where: {}, truncate: false });
+
+        // Step 3: Wipe Activity Logs
+        await sequelize.query("DELETE FROM activity_logs");
+
+        console.log("AI Model & Activity logs moved to Trash.");
+        res.json({ success: true, message: "AI model reset. Data moved to Trash for 24 hours." });
+    } catch (err) {
+        console.error("RESET MODEL FAILED:", err);
+        res.status(500).json({ error: "Failed to reset model", details: err.message, stack: err.stack });
+    }
+});
+
+// --- UNDO LAST DELETE ACTION ---
+// Restores the most recent backup from the Trash if it's within the 24h window.
+app.post('/api/settings/undo', async (req, res) => {
+    try {
+        const lastTrash = await Trash.findOne({ order: [['createdAt', 'DESC']] });
+        if (!lastTrash) return res.status(404).json({ error: "Nothing to undo." });
+
+        const data = JSON.parse(lastTrash.data);
+
+        if (lastTrash.type === 'HISTORY_WIPE') {
+            for (const sessionData of data) {
+                const session = await Session.create({
+                    id: sessionData.id,
+                    title: sessionData.title,
+                    isTitleGenerated: sessionData.isTitleGenerated,
+                    createdAt: sessionData.createdAt,
+                    updatedAt: sessionData.updatedAt
+                });
+                if (sessionData.Chats) {
+                    for (const chatData of sessionData.Chats) {
+                        await Chat.create({
+                            id: chatData.id,
+                            sessionId: session.id,
+                            role: chatData.role,
+                            message: chatData.message,
+                            createdAt: chatData.createdAt,
+                            updatedAt: chatData.updatedAt
+                        });
+                    }
+                }
+            }
+        } else if (lastTrash.type === 'MODEL_RESET') {
+            if (data.cache) {
+                for (const item of data.cache) {
+                    await SemanticCache.create(item);
+                }
+            }
+            if (data.logs) {
+                for (const log of data.logs) {
+                    await sequelize.query(
+                        "INSERT INTO activity_logs (id, timestamp, action_type, action_value, accepted) VALUES (?, ?, ?, ?, ?)",
+                        { replacements: [log.id, log.timestamp, log.action_type, log.action_value, log.accepted] }
+                    );
+                }
+            }
+        }
+
+        await lastTrash.destroy();
+        res.json({ success: true, message: "Action successfully undone!" });
+    } catch (err) {
+        console.error("UNDO FAILED:", err);
+        res.status(500).json({ error: "Failed to undo action", details: err.message });
     }
 });
 
@@ -488,6 +615,34 @@ async function runIdleTitleGenerator() {
 
     // Check again in 3 seconds
     setTimeout(runIdleTitleGenerator, 3000);
+}
+
+// --- BACKGROUND TRASH PURGER ---
+// Automatically deletes backups older than a certain threshold.
+async function runTrashPurger() {
+    try {
+        const { Op } = require('sequelize');
+        
+        // PRODUCTION SETTING: 24-hour undo window.
+        const thresholdDate = new Date(Date.now() - 24 * 60 * 60 * 1000); 
+
+        const deletedCount = await Trash.destroy({
+            where: {
+                createdAt: {
+                    [Op.lt]: thresholdDate
+                }
+            }
+        });
+
+        if (deletedCount > 0) {
+            console.log(`\x1b[35m[TRASH PURGER] Permanently deleted ${deletedCount} expired backups.\x1b[0m`);
+        }
+    } catch (err) {
+        console.error("[TRASH PURGER] Error:", err.message);
+    }
+
+    // Check every hour
+    setTimeout(runTrashPurger, 60 * 60 * 1000);
 }
 
 // START THE SERVER
