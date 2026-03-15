@@ -10,6 +10,18 @@ const fs = require('fs');     // Node.js File System
 const os = require('os');     // OS user directory info
 
 /**
+ * Sanitizes a path string to prevent PowerShell command injection.
+ * Escapes backticks, double-quotes, dollar signs, and semicolons.
+ *
+ * @param {string} inputPath - Raw path string.
+ * @returns {string} - Escaped path safe for embedding in PS strings.
+ */
+const sanitizePath = (inputPath) => {
+    if (typeof inputPath !== 'string') return '';
+    return inputPath.replace(/[`"$;]/g, (c) => '`' + c);
+};
+
+/**
  * Intelligent Path Resolution
  * converts "Desktop", "Downloads", "My Documents" into absolute system paths.
  * 
@@ -32,8 +44,8 @@ const resolvePath = (userPath) => {
 
     // 2. Map Special Keyword Folders with Sub-path support
     const baseFolders = {
-        'desktop': fs.existsSync(path.join(homedir, 'OneDrive', 'Desktop')) 
-            ? path.join(homedir, 'OneDrive', 'Desktop') 
+        'desktop': fs.existsSync(path.join(homedir, 'OneDrive', 'Desktop'))
+            ? path.join(homedir, 'OneDrive', 'Desktop')
             : path.join(homedir, 'Desktop'),
         'download': path.join(homedir, 'Downloads'),
         'document': path.join(homedir, 'Documents'),
@@ -44,7 +56,7 @@ const resolvePath = (userPath) => {
     };
 
     const lower = userPath.toLowerCase().trim();
-    
+
     // Check if the input starts with a known folder keyword
     for (const [keyword, baseDir] of Object.entries(baseFolders)) {
         // Match "desktop", "desktop/file.txt", or "desktop\file.txt"
@@ -75,13 +87,15 @@ const executeFileAction = async (target, action, entities, rawIntent, rawQuery =
         }
 
         // --- ACTION 1: CREATE ---
-        if (action.includes('create') || action === 'make') {
+        // FIX: was `action === 'make'` which never matched — changed to action.includes('make')
+        if (action.includes('create') || action.includes('make')) {
             // Determine if File or Directory based on extension (simple heuristic)
             const itemType = (entities.type === 'file' || target.includes('.')) ? 'File' : 'Directory';
+            const safePath = sanitizePath(targetPath);
 
             // PowerShell: New-Item
-            // -Force allows overwriting strictness (but usually won't overwrite existing content unless specifed)
-            const ps = `New-Item -Path "${targetPath}" -ItemType ${itemType} -Force -ErrorAction Stop`;
+            // -Force allows overwriting strictness (but usually won't overwrite existing content unless specified)
+            const ps = `New-Item -Path "${safePath}" -ItemType ${itemType} -Force -ErrorAction Stop`;
             await runPowerShell(ps);
             return `Created ${itemType} at "${targetPath}"`;
         }
@@ -90,7 +104,8 @@ const executeFileAction = async (target, action, entities, rawIntent, rawQuery =
         if (action.includes('delete') || action.includes('remove')) {
             // PowerShell: Remove-Item
             // -Recurse deletes subfolders. -Force deletes read-only.
-            const ps = `Remove-Item -Path "${targetPath}" -Recurse -Force -ErrorAction Stop`;
+            const safePath = sanitizePath(targetPath);
+            const ps = `Remove-Item -Path "${safePath}" -Recurse -Force -ErrorAction Stop`;
             await runPowerShell(ps);
             return `Deleted "${targetPath}"`;
         }
@@ -99,15 +114,25 @@ const executeFileAction = async (target, action, entities, rawIntent, rawQuery =
         if (action.includes('list') || action.includes('open')) {
             if (!fs.existsSync(targetPath)) return `Path not found: ${targetPath}`;
 
+            // FIX: lstatSync can throw on permission errors — wrapped in try/catch
+            let stat;
+            try {
+                stat = fs.lstatSync(targetPath);
+            } catch (e) {
+                return `Cannot access "${targetPath}": ${e.message}`;
+            }
+
             // Case A: It's a File -> Launch it
-            if (fs.lstatSync(targetPath).isFile()) {
-                await runPowerShell(`Invoke-Item "${targetPath}"`); // Equivalent to double-clicking
+            if (stat.isFile()) {
+                // FIX: path was not sanitized before being passed to PowerShell
+                await runPowerShell(`Invoke-Item "${sanitizePath(targetPath)}"`);
                 return `Opened ${targetPath}`;
             }
 
             // Case B: It's a Folder -> List Files
             // Get first 20 items to avoid flooding chat
-            const ps = `Get-ChildItem -Path "${targetPath}" -Name | Select-Object -First 20`;
+            const safePath = sanitizePath(targetPath);
+            const ps = `Get-ChildItem -Path "${safePath}" -Name | Select-Object -First 20`;
             const output = await runPowerShell(ps);
             // Format output as comma-separated string
             const files = output.replace(/\r\n/g, ", ").trim();
@@ -118,8 +143,10 @@ const executeFileAction = async (target, action, entities, rawIntent, rawQuery =
         if (action.includes('rename')) {
             const newName = entities.destination || entities.name;
             if (!newName) return "Please specify a new name.";
+            const safePath = sanitizePath(targetPath);
+            const safeName = sanitizePath(newName);
             // PowerShell: Rename-Item
-            const ps = `Rename-Item -Path "${targetPath}" -NewName "${newName}" -ErrorAction Stop`;
+            const ps = `Rename-Item -Path "${safePath}" -NewName "${safeName}" -ErrorAction Stop`;
             await runPowerShell(ps);
             return `Renamed to "${newName}"`;
         }
