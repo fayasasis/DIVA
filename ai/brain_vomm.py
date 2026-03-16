@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import time
 from collections import defaultdict
 
 class TrieNode:
@@ -31,6 +32,23 @@ class BrainVOMM:
         
         self.db_path = os.path.join(os.path.dirname(__file__), '../backend/database.sqlite')
 
+        # --- ANTI-SPAM: Cooldown & Repeat Suppression ---
+        self._last_suggested_app = None
+        self._last_suggestion_time = 0
+        self.suggestion_cooldown = 120  # 2 minutes
+
+        # --- QUALITY GATE: Minimum sample size ---
+        self.min_samples = 5
+
+        # --- CONFIDENCE THRESHOLDS (raised from original) ---
+        self.confidence_thresholds = {
+            1: 0.60,
+            2: 0.45,
+            3: 0.35,
+            4: 0.28,
+            5: 0.25,
+        }
+
     def load_data(self):
         """Rebuild the exact state of the VOMM Trie from historical DB logs."""
         try:
@@ -43,7 +61,6 @@ class BrainVOMM:
             
             actions = [row[0] for row in rows]
             
-            # Reconstruct real-time app transitions
             self.history_buffer = []
             for action in actions:
                 norm_action = self.normalize(action)
@@ -63,7 +80,7 @@ class BrainVOMM:
         if "Spotify" in title: return "Spotify"
         if "Calculator" in title: return "Calculator"
         if "Notepad" in title: return "Notepad"
-        if "DIVA" in title: return "DIVA Assistant"
+        if "diva" in title.lower(): return "DIVA Assistant"
         return title.split(' - ')[-1]
 
     def _update_trie(self, context_sequence, next_action):
@@ -75,14 +92,11 @@ class BrainVOMM:
         Updates Node(C)->Node(B) with D.
         Updates Node(C)->Node(B)->Node(A) with D.
         """
-        # Always update the 0-order (global frequencies)
         self.root.transitions[next_action] += 1
         self.root.total_count += 1
         
         node = self.root
         
-        # Traverse backwards through the context sequence
-        # e.g., if context is [A, B, C], we traverse C, then B, then A
         for item in reversed(context_sequence):
             node = node.children[item]
             node.transitions[next_action] += 1
@@ -92,37 +106,35 @@ class BrainVOMM:
         """Records an event, updating all variable-order lengths, and adds to history buffer."""
         if not current_action: return
         
-        # If we have history, learn the transition FROM history TO current_action
         if self.history_buffer:
-            # Prevent learning rapid self-transitions (A -> A)
             if current_action == self.history_buffer[-1]:
                 return
                 
             self._update_trie(self.history_buffer, current_action)
             
-        # Push the new action into the history buffer
         self.history_buffer.append(current_action)
         
-        # Keep buffer constrained to our max 'memory' size
         if len(self.history_buffer) > self.max_order:
             self.history_buffer.pop(0)
 
     def predict(self):
         """
-        Finds the longest matching context in the Trie that passes the confidence threshold.
+        Finds the longest matching context in the Trie that passes the confidence threshold,
+        minimum sample size, cooldown, and repeat suppression gates.
         Gracefully falls back to shorter contexts (Variable Order).
         """
         if not self.history_buffer:
-            return None # No context
-            
-        # Try matching the longest sequence first, then subtract one and try again
+            return None
+
+        # --- ANTI-SPAM: Cooldown check ---
+        now = time.time()
+        if (now - self._last_suggestion_time) < self.suggestion_cooldown:
+            return None
+
         for order_length in range(len(self.history_buffer), 0, -1):
             
-            # Get the exact trailing sequence we are testing
-            # e.g if buffer is [A, B, C] and length is 2, slice is [B, C]
             context_slice = self.history_buffer[-order_length:]
             
-            # Walk down the Trie using this slice (backwards!)
             node = self.root
             valid_path = True
             
@@ -133,21 +145,38 @@ class BrainVOMM:
                 node = node.children[item]
                 
             if not valid_path or not node.transitions:
-                continue # Path didn't exist or had no outgoing edges. Shift to a smaller order.
-                
-            # If we reached this node, we have historical data for this exact sequence
-            # Find the most likely next app
+                continue
+
+            # --- QUALITY GATE: Minimum sample size ---
+            if node.total_count < self.min_samples:
+                continue
+
             likely_next = max(node.transitions, key=node.transitions.get)
             count = node.transitions[likely_next]
             total = node.total_count
             
             confidence = count / total if total > 0 else 0.0
-            
-            # A longer sequence requires slightly less confidence threshold because it's highly specific
-            # A short sequence (Order 1) requires high confidence because it's very generic
-            min_confidence = 0.4 if order_length == 1 else 0.25
+
+            min_confidence = self.confidence_thresholds.get(order_length, 0.25)
             
             if confidence >= min_confidence:
+
+                # --- ANTI-SPAM: Don't suggest the same app twice in a row ---
+                if likely_next == self._last_suggested_app:
+                    continue
+
+                # Don't suggest the app the user is already in
+                if likely_next == self.history_buffer[-1]:
+                    continue
+
+                # Don't suggest DIVA suggesting itself (case-insensitive)
+                if "diva" in likely_next.lower() or likely_next.lower() == "diva assistant":
+                    continue
+
+                # All gates passed — fire the suggestion
+                self._last_suggested_app = likely_next
+                self._last_suggestion_time = now
+
                 context_str = " -> ".join(context_slice)
                 return {
                     "type": "suggestion",
@@ -155,8 +184,7 @@ class BrainVOMM:
                     "next_action": likely_next,
                     "confidence": round(confidence, 2),
                     "order_used": order_length,
-                    "reason": f"VOMM(Order {order_length}): Saw '{context_str}' followed by '{likely_next}' {count} times"
+                    "reason": f"VOMM(Order {order_length}): Saw '{context_str}' followed by '{likely_next}' {count}/{total} times"
                 }
 
-        # If we exhausted all fallbacks and found nothing confident
         return None

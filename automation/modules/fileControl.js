@@ -12,9 +12,6 @@ const os = require('os');     // OS user directory info
 /**
  * Sanitizes a path string to prevent PowerShell command injection.
  * Escapes backticks, double-quotes, dollar signs, and semicolons.
- *
- * @param {string} inputPath - Raw path string.
- * @returns {string} - Escaped path safe for embedding in PS strings.
  */
 const sanitizePath = (inputPath) => {
     if (typeof inputPath !== 'string') return '';
@@ -22,133 +19,218 @@ const sanitizePath = (inputPath) => {
 };
 
 /**
- * Intelligent Path Resolution
- * converts "Desktop", "Downloads", "My Documents" into absolute system paths.
- * 
- * @param {string} userPath - The path or folder name typed by the user.
- * @returns {string} - The absolute path.
+ * Converts keyword folder names into absolute system paths.
+ * Supports both singular and plural forms (e.g. "download" and "downloads").
  */
 const resolvePath = (userPath) => {
-    const homedir = os.homedir(); // e.g., C:\Users\Fayas
+    const homedir = os.homedir();
 
-    // Default: Return Desktop if input is empty
-    if (!userPath) {
-        const oneDriveDesktop = path.join(homedir, 'OneDrive', 'Desktop');
-        if (fs.existsSync(oneDriveDesktop)) return oneDriveDesktop;
-        return path.join(homedir, 'Desktop');
-    }
-
-    // 1. Check if it's already an Absolute Path (e.g., "C:\Users\test")
+    if (!userPath) return path.join(homedir, 'Desktop');
     if (path.isAbsolute(userPath)) return userPath;
-    if (/^[A-Za-z]:$/.test(userPath)) return userPath + "\\"; // Handle drive letters "E:"
+    if (/^[A-Za-z]:$/.test(userPath)) return userPath + "\\";
 
-    // 2. Map Special Keyword Folders with Sub-path support
     const baseFolders = {
-        'desktop': fs.existsSync(path.join(homedir, 'OneDrive', 'Desktop'))
-            ? path.join(homedir, 'OneDrive', 'Desktop')
-            : path.join(homedir, 'Desktop'),
-        'download': path.join(homedir, 'Downloads'),
-        'document': path.join(homedir, 'Documents'),
-        'picture': path.join(homedir, 'Pictures'),
-        'video': path.join(homedir, 'Videos'),
-        'movie': path.join(homedir, 'Videos'),
-        'music': path.join(homedir, 'Music')
+        'desktop':   path.join(homedir, 'Desktop'),
+        'download':  path.join(homedir, 'Downloads'),
+        'downloads': path.join(homedir, 'Downloads'),
+        'document':  path.join(homedir, 'Documents'),
+        'documents': path.join(homedir, 'Documents'),
+        'picture':   path.join(homedir, 'Pictures'),
+        'pictures':  path.join(homedir, 'Pictures'),
+        'video':     path.join(homedir, 'Videos'),
+        'videos':    path.join(homedir, 'Videos'),
+        'movie':     path.join(homedir, 'Videos'),
+        'movies':    path.join(homedir, 'Videos'),
+        'music':     path.join(homedir, 'Music'),
     };
 
     const lower = userPath.toLowerCase().trim();
 
-    // Check if the input starts with a known folder keyword
     for (const [keyword, baseDir] of Object.entries(baseFolders)) {
-        // Match "desktop", "desktop/file.txt", or "desktop\file.txt"
         if (lower === keyword || lower.startsWith(keyword + '/') || lower.startsWith(keyword + '\\')) {
             const subPath = userPath.slice(keyword.length).replace(/^[\\\/]+/, '');
             return path.join(baseDir, subPath);
         }
     }
 
-    // 3. Fallback: Treat as relative path on Desktop
-    // e.g., "Divaproject" -> "C:\Users\Fayas\Desktop\Divaproject"
-    const baseDesktop = baseFolders['desktop'];
-    return path.join(baseDesktop, userPath);
+    return path.join(homedir, 'Desktop', userPath);
 };
 
-// Main Execution Function
+/**
+ * Case-insensitive + extension-aware path correction.
+ * If the exact path doesn't exist on disk, scans the parent directory for a
+ * file/folder whose name matches ignoring case or missing extension.
+ * e.g. "meenakshi" → "Meenakshi.pdf", "devi" → "Devi"
+ */
+const resolveRealPath = (p) => {
+    if (fs.existsSync(p)) return p;
+
+    const dir = path.dirname(p);
+    const name = path.basename(p).toLowerCase();
+
+    if (!fs.existsSync(dir)) return p;
+
+    const entries = fs.readdirSync(dir);
+    const match = entries.find(e =>
+        e.toLowerCase() === name ||
+        path.parse(e).name.toLowerCase() === name
+    );
+
+    return match ? path.join(dir, match) : p;
+};
+
+/**
+ * Central path resolver for EXISTING files/folders (delete, open, list, rename).
+ * Checks entities.path → entities.destination → entities.location → Desktop fallback.
+ * Then corrects casing and missing extensions against what's on disk.
+ */
+const resolveTargetPath = (t, entities) => {
+    let p;
+
+    if (entities.path) {
+        p = resolvePath(entities.path);
+    } else if (entities.destination) {
+        p = path.join(resolvePath(entities.destination), t);
+    } else if (entities.location) {
+        p = path.join(resolvePath(entities.location), t);
+    } else {
+        p = resolvePath(t);
+    }
+
+    return resolveRealPath(p);
+};
+
+/**
+ * Path resolver for NEW files/folders (create only).
+ * Skips resolveRealPath since the file doesn't exist yet.
+ */
+const resolveNewPath = (t, entities) => {
+    if (entities.path) return resolvePath(entities.path);
+    if (entities.destination) return path.join(resolvePath(entities.destination), t);
+    if (entities.location) return path.join(resolvePath(entities.location), t);
+    return resolvePath(t);
+};
+
+/**
+ * Extracts the real target name from entities.
+ * phi3 is inconsistent — sometimes uses "name", "target", or the raw target param.
+ * Filters out generic words like "folder" and "file".
+ */
+const extractTargetName = (target, entities) => {
+    const genericWords = ['folder', 'file', 'directory'];
+    const candidates = [
+        entities.name,
+        entities.target,
+        entities.from,
+        target
+    ];
+    for (const c of candidates) {
+        if (c && !genericWords.includes(c.toLowerCase().trim())) {
+            return c;
+        }
+    }
+    return target;
+};
+
+// ==============================
+// MAIN EXECUTION FUNCTION
+// ==============================
 const executeFileAction = async (target, action, entities, rawIntent, rawQuery = "") => {
     try {
         console.log(`File Action: ${action} | Target: ${target}`);
+        console.log(`Entities: ${JSON.stringify(entities)}`);
 
-        // Resolve the primary target path
-        // Priority: entities.path > target > entities.source > Default "New_Folder"
-        let targetPath = resolvePath(entities.path || target || entities.source || "New_Folder");
-
-        // Handle composite actions: "Create [target] in [destination]"
-        if (action.includes('create') && entities.destination) {
-            targetPath = path.join(resolvePath(entities.destination), target || entities.source || "New_Folder");
+        // --- EXTRACT MULTIPLE TARGETS ---
+        let targets = [];
+        if (entities.targets && Array.isArray(entities.targets)) {
+            targets = entities.targets;
+        } else if (target && target.includes(' and ')) {
+            targets = target.split(' and ').map(t => t.trim());
+        } else if (target) {
+            targets = [target];
+        } else if (entities.source) {
+            targets = [entities.source];
+        } else {
+            targets = ["New_Folder"];
         }
 
         // --- ACTION 1: CREATE ---
-        // FIX: was `action === 'make'` which never matched — changed to action.includes('make')
         if (action.includes('create') || action.includes('make')) {
-            // Determine if File or Directory based on extension (simple heuristic)
-            const itemType = (entities.type === 'file' || target.includes('.')) ? 'File' : 'Directory';
-            const safePath = sanitizePath(targetPath);
+            let results = [];
+            for (const t of targets) {
+                let realName = extractTargetName(t, entities);
 
-            // PowerShell: New-Item
-            // -Force allows overwriting strictness (but usually won't overwrite existing content unless specified)
-            const ps = `New-Item -Path "${safePath}" -ItemType ${itemType} -Force -ErrorAction Stop`;
-            await runPowerShell(ps);
-            return `Created ${itemType} at "${targetPath}"`;
+                // If type is file but no extension given, default to .txt
+                if (entities.type === 'file' && !realName.includes('.')) {
+                    realName = realName + '.txt';
+                }
+
+                const p = resolveNewPath(realName, entities);
+                const itemType = (entities.type === 'file' || realName.includes('.')) ? 'File' : 'Directory';
+                console.log(`[CREATE] Resolved path: "${p}" | Type: ${itemType}`);
+                const ps = `New-Item -Path "${sanitizePath(p)}" -ItemType ${itemType} -Force -ErrorAction Stop`;
+                const result = await runPowerShell(ps);
+                console.log(`[CREATE] PowerShell result:`, result);
+                results.push(`"${p}"`);
+            }
+            return `Created ${results.join(', ')}`;
         }
 
         // --- ACTION 2: DELETE ---
         if (action.includes('delete') || action.includes('remove')) {
-            // PowerShell: Remove-Item
-            // -Recurse deletes subfolders. -Force deletes read-only.
-            const safePath = sanitizePath(targetPath);
-            const ps = `Remove-Item -Path "${safePath}" -Recurse -Force -ErrorAction Stop`;
-            await runPowerShell(ps);
-            return `Deleted "${targetPath}"`;
+            let results = [];
+            for (const t of targets) {
+                const p = resolveTargetPath(t, entities);
+                console.log(`[DELETE] Resolved path: "${p}"`);
+                const ps = `Remove-Item -Path "${sanitizePath(p)}" -Recurse -Force -ErrorAction Stop`;
+                const result = await runPowerShell(ps);
+                console.log(`[DELETE] PowerShell result:`, result);
+                results.push(`"${p}"`);
+            }
+            return `Deleted ${results.join(', ')}`;
         }
 
         // --- ACTION 3: LIST CONTENTS / OPEN ---
         if (action.includes('list') || action.includes('open')) {
-            if (!fs.existsSync(targetPath)) return `Path not found: ${targetPath}`;
+            const t = extractTargetName(targets[0], entities);
+            const p = resolveTargetPath(t, entities);
+            console.log(`[OPEN/LIST] Resolved path: "${p}"`);
 
-            // FIX: lstatSync can throw on permission errors — wrapped in try/catch
+            if (!fs.existsSync(p)) return `Path not found: "${p}"`;
+
             let stat;
             try {
-                stat = fs.lstatSync(targetPath);
+                stat = fs.lstatSync(p);
             } catch (e) {
-                return `Cannot access "${targetPath}": ${e.message}`;
+                return `Cannot access "${p}": ${e.message}`;
             }
 
-            // Case A: It's a File -> Launch it
             if (stat.isFile()) {
-                // FIX: path was not sanitized before being passed to PowerShell
-                await runPowerShell(`Invoke-Item "${sanitizePath(targetPath)}"`);
-                return `Opened ${targetPath}`;
+                const result = await runPowerShell(`Invoke-Item "${sanitizePath(p)}"`);
+                console.log(`[OPEN] PowerShell result:`, result);
+                return `Opened "${p}"`;
             }
 
-            // Case B: It's a Folder -> List Files
-            // Get first 20 items to avoid flooding chat
-            const safePath = sanitizePath(targetPath);
-            const ps = `Get-ChildItem -Path "${safePath}" -Name | Select-Object -First 20`;
+            const ps = `Get-ChildItem -Path "${sanitizePath(p)}" -Name | Select-Object -First 20`;
             const output = await runPowerShell(ps);
-            // Format output as comma-separated string
-            const files = output.replace(/\r\n/g, ", ").trim();
-            return `Contents of ${path.basename(targetPath)}: ${files}`;
+            console.log(`[LIST] PowerShell result:`, output);
+            const files = (output || '').toString().replace(/\r\n/g, ", ").trim();
+            return `Contents of "${path.basename(p)}": ${files}`;
         }
 
         // --- ACTION 4: RENAME ---
         if (action.includes('rename')) {
-            const newName = entities.destination || entities.name;
+            const sourceName = entities.from || entities.target || targets[0];
+            const newName = entities.to || entities.new_name || entities.name;
             if (!newName) return "Please specify a new name.";
-            const safePath = sanitizePath(targetPath);
-            const safeName = sanitizePath(newName);
-            // PowerShell: Rename-Item
-            const ps = `Rename-Item -Path "${safePath}" -NewName "${safeName}" -ErrorAction Stop`;
-            await runPowerShell(ps);
-            return `Renamed to "${newName}"`;
+
+            const p = resolveTargetPath(sourceName, entities);
+            console.log(`[RENAME] Resolved path: "${p}"`);
+
+            const ps = `Rename-Item -Path "${sanitizePath(p)}" -NewName "${sanitizePath(newName)}" -ErrorAction Stop`;
+            const result = await runPowerShell(ps);
+            console.log(`[RENAME] PowerShell result:`, result);
+            return `Renamed "${sourceName}" to "${newName}"`;
         }
 
     } catch (err) {

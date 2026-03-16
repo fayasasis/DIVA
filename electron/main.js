@@ -255,7 +255,8 @@ ipcMain.on('update-settings', (event, newSettings) => {
         }
     
         // Apply Always On Top
-        mainWindow.setAlwaysOnTop(appSettings.alwaysOnTop);
+        const updatedAlwaysOnTop = newSettings.alwaysOnTop !== undefined ? newSettings.alwaysOnTop : appSettings.alwaysOnTop;
+        mainWindow.setAlwaysOnTop(updatedAlwaysOnTop);
     }
     
     // Merge new settings into persistent state AFTER checking for changes (like window mode above)

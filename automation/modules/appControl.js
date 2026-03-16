@@ -78,20 +78,35 @@ const executeAppAction = async (target, action) => {
     // Matches "spotfi" -> "Spotify" using Levenshtein distance.
     const bestApp = findBestMatch(searchTarget, appCache, 'Name');
 
+    // --- GET TRUE PROCESS NAME ---
+    // Target might be "Google Chrome" but process name is "chrome"
+    const lookupName = bestApp ? bestApp.Name : target;
+    let finalProcName = lookupName;
+    
+    if (action === 'close' || action === 'restart') {
+        const processesJson = await runPowerShellData(`Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Select-Object ProcessName, MainWindowTitle | ConvertTo-Json -Depth 1`);
+        let processes = [];
+        try { processes = JSON.parse(processesJson) || []; } catch (e) {}
+        if (!Array.isArray(processes)) processes = [processes];
+
+        let targetProc = findBestMatch(lookupName, processes, 'ProcessName') || findBestMatch(lookupName, processes, 'MainWindowTitle');
+        if (targetProc) {
+            finalProcName = targetProc.ProcessName;
+        }
+    }
+
     // --- ACTION: CLOSE APP ---
     if (action === 'close') {
-        // Use best matched name, or raw target if no match
-        const procName = bestApp ? bestApp.Name : target;
         // Stop-Process kills the app. -Force ensures it closes. SilentlyContinue ignores errors if not running.
-        await runPowerShell(`Stop-Process -Name "${procName}" -Force -ErrorAction SilentlyContinue`);
-        return `Closing ${procName}.`;
+        await runPowerShell(`Stop-Process -Name "${finalProcName}" -Force -ErrorAction SilentlyContinue`);
+        // Special case: UWP Apps like Calculator might leave background processes, try killing by ID if we had one, but Name usually works.
+        return `Closing ${finalProcName}.`;
     }
 
     // --- ACTION: RESTART APP ---
     if (action === 'restart') {
-        const procName = bestApp ? bestApp.Name : target;
         // Kill it first
-        await runPowerShell(`Stop-Process -Name "${procName}" -Force -ErrorAction SilentlyContinue`);
+        await runPowerShell(`Stop-Process -Name "${finalProcName}" -Force -ErrorAction SilentlyContinue`);
         // Wait 1.5s to ensure it's fully dead
         await new Promise(r => setTimeout(r, 1500));
         // Code execution falls through to "Open" logic below...

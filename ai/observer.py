@@ -62,11 +62,15 @@ def init_db():
                 INSTALLED_APPS_CACHE.add("google chrome")
                 INSTALLED_APPS_CACHE.add("microsoft edge")
                 INSTALLED_APPS_CACHE.add("visual studio code")
-                INSTALLED_APPS_CACHE.add("diva assistant") # Fake app so it doesn't get filtered out
                 INSTALLED_APPS_CACHE.add("spotify")
                 INSTALLED_APPS_CACHE.add("calculator")
                 INSTALLED_APPS_CACHE.add("notepad")
                 INSTALLED_APPS_CACHE.add("file explorer")
+
+                # PROTECTIVE PURGE: Ensure no DIVA entries leaked into the cache
+                to_remove = [app for app in INSTALLED_APPS_CACHE if "diva" in app.lower()]
+                for app in to_remove:
+                    INSTALLED_APPS_CACHE.remove(app)
         except Exception as e:
             print(f"[WARN] Failed to load app cache: {e}")
             
@@ -117,7 +121,7 @@ def get_active_window():
             return "Microsoft Edge"
             
         # 3. DIVA (The Assistant Itself)
-        if "DIVA" in title and "Visual Studio Code" not in title: 
+        if "diva" in title.lower(): 
             return "DIVA Assistant"
 
         # 4. Common Apps

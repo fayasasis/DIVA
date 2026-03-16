@@ -138,13 +138,77 @@ function App() {
       };
 
       ipcRenderer.on('backend-log', handleLogs);
-
       return () => {
-        ipcRenderer.removeListener('prediction', handlePrediction);
-        ipcRenderer.removeListener('backend-log', handleLogs);
+        ipcRenderer.removeAllListeners('prediction');
+        ipcRenderer.removeAllListeners('backend-log');
       };
     }
   }, []);
+
+  // --- 2.7 WEB SPEECH API (STT) ---
+  const [recognition, setRecognition] = useState(null);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.lang = 'en-US';
+
+      rec.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        addMessage('user', transcript);
+        handleSendVoice(transcript);
+        setIsRecording(false);
+      };
+
+      rec.onerror = (event) => {
+        console.error("Speech Error:", event.error);
+        setIsRecording(false);
+      };
+
+      rec.onend = () => {
+        setIsRecording(false);
+      };
+
+      setRecognition(rec);
+    }
+  }, []);
+
+  const handleSendVoice = async (text) => {
+    try {
+      const payload = { 
+          text: text,
+          safeMode: settings.safeMode
+      };
+      if (currentSession) payload.sessionId = currentSession;
+
+      let res = await axios.post('http://localhost:5000/chat', payload);
+
+      if (res.data.requiresConfirmation) {
+          const proceed = window.confirm(`SAFE MODE WARNING\n\nA sensitive command was detected.\nAre you sure you want to execute:\n"${text}"?`);
+          if (proceed) {
+              payload.bypassSafeMode = true;
+              res = await axios.post('http://localhost:5000/chat', payload);
+          } else {
+              addMessage('bot', 'Action aborted by Safe Mode.');
+              if (settings.voiceResponse) speak('Action aborted by Safe Mode.');
+              return;
+          }
+      }
+
+      const botText = res.data.response || "Done";
+      addMessage('bot', botText);
+      if (settings.voiceResponse) speak(botText);
+
+      if (res.data.isNewSession) setCurrentSession(res.data.sessionId);
+      fetchSessions();
+    } catch (e) {
+      console.error(e);
+      addMessage('bot', "Error communicating with DIVA server.");
+    }
+  };
 
   // Effect: Auto-scroll to latest message
   useEffect(() => {
@@ -238,12 +302,23 @@ function App() {
   const [ttsProgress, setTtsProgress] = useState(0);
   const ttsIntervalRef = useRef(null);
 
-  const speak = (text) => {
+  const speak = (originalText) => {
     window.speechSynthesis.cancel(); // Stop current
     clearInterval(ttsIntervalRef.current);
     setTtsProgress(0);
 
-    const u = new SpeechSynthesisUtterance(text);
+    // Filter text for TTS: If it's a deletion message like 'Deleted "C:\Users\...\file.txt"',
+    // extract just the filename so it reads smoother.
+    let speakText = originalText;
+    if (speakText.startsWith('Deleted "')) {
+        speakText = speakText.replace(/Deleted\s+"([^"]+)"/g, (match, p1) => {
+            // Get just the filename/foldername from the path
+            const filename = p1.split('\\').pop().split('/').pop();
+            return `Deleted ${filename}`;
+        });
+    }
+
+    const u = new SpeechSynthesisUtterance(speakText);
     u.rate = settings.speakingRate;
     u.pitch = settings.voicePitch || 1.0;
 
@@ -357,13 +432,21 @@ function App() {
 
   // Toggle Voice Recording
   const toggleMic = () => {
-    if (!socket) return;
+    if (!recognition) {
+      alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+
     if (isRecording) {
-      socket.emit('stop_listening');
+      recognition.stop();
       setIsRecording(false);
     } else {
-      socket.emit('start_listening', { safeMode: settings.safeMode });
-      setIsRecording(true);
+      try {
+        recognition.start();
+        setIsRecording(true);
+      } catch (e) {
+        console.error("Failed to start recognition", e);
+      }
     }
   };
 
